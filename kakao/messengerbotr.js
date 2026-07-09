@@ -28,7 +28,10 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
       .text();
 
     const data = JSON.parse(body);
-    replier.reply(data.reply || "Empty reply from server.");
+    if (!data || data.silent || !data.reply) {
+      return;
+    }
+    replier.reply(String(data.reply));
   } catch (error) {
     replier.reply(
       "KakaoPoGo server connection failed.\n" +

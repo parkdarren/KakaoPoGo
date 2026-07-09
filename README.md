@@ -11,6 +11,7 @@ weaknesses, forms, aliases, and room-specific custom commands.
 - Pokemon GO dex lookup with Korean names and common form names.
 - Compact 100% IV CP output for research, raid, weather-boosted raid, and Lv50.
 - Type and weakness lookup for raid preparation.
+- Korean move lookup for normal, special, and legacy/Elite TM moves.
 - Custom CP calculator by level and IV spread.
 - Short aliases such as `디아`, `alg`, and `루가` for frequent room searches.
 - Role-based owner/admin management for room custom commands.
@@ -25,6 +26,7 @@ weaknesses, forms, aliases, and room-specific custom commands.
 !도감 디아
 !도감 alg
 !도감 자시안 검왕
+!스킬 피카츄
 !100 기라티나 오리진
 !약점 뮤츠
 !cp 피카츄 40 15/15/15
@@ -49,6 +51,19 @@ No.483 디아루가 / Dialga
 
 If a Pokemon has legacy or Elite TM moves, only those special moves are shown in
 the dex reply. Regular moves are intentionally omitted to keep chat output short.
+
+Example move reply:
+
+```text
+No.025 피카츄 / Pikachu
+[ 기술 ]
+노말: 전기쇼크 / 전광석화
+스페셜: 방전 / 10만볼트 / 와일드볼트
+
+[ 레거시/대기머 기술 ]
+노말: 프레젠트
+스페셜: 파도타기 / 번개
+```
 
 ## Architecture
 
@@ -137,16 +152,18 @@ Detailed notes are in `deploy/IWINV_VPS.md`.
 ## Data
 
 Pokemon GO data is fetched from the community PoGo API and cached under
-`.cache/pogoapi`. Korean Pokemon names are stored in:
+`.cache/pogoapi`. Korean Pokemon and move names are stored in:
 
 ```text
 app/data/korean_names.json
+app/data/korean_moves.json
 ```
 
 Regenerate the Korean name map:
 
 ```powershell
 python scripts/generate_korean_names.py
+python scripts/generate_korean_moves.py
 ```
 
 ## Tests
@@ -155,7 +172,7 @@ python scripts/generate_korean_names.py
 python -m pytest
 ```
 
-The test suite covers command parsing, CP calculation, Korean name/form
+The test suite covers command parsing, CP calculation, Korean name/form and move
 resolution, compact dex formatting, and owner/admin command behavior.
 
 ## Notes

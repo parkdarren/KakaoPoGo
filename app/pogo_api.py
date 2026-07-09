@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from app.cp import FALLBACK_CPM, calculate_cp, perfect_cp_table
-from app.localization import ko_form, ko_type, ko_weather
+from app.localization import ko_form, ko_move, ko_type, ko_weather
 from app.name_map import NameResolver
 
 
@@ -229,9 +229,9 @@ def format_dex_reply(entry: PokemonDexEntry) -> str:
     if elite:
         elite_lines.extend(["", "[ 레거시/대기머 기술 ]"])
         if entry.elite_fast_moves:
-            elite_lines.append(f"노말: {' / '.join(entry.elite_fast_moves)}")
+            elite_lines.append(f"노말: {_format_move_list(entry.elite_fast_moves)}")
         if entry.elite_charged_moves:
-            elite_lines.append(f"스페셜: {' / '.join(entry.elite_charged_moves)}")
+            elite_lines.append(f"스페셜: {_format_move_list(entry.elite_charged_moves)}")
 
     lines = [
         f"{number} {korean_name} / {english_name}",
@@ -260,6 +260,38 @@ def format_perfect_cp_reply(entry: PokemonDexEntry) -> str:
         "100% IV CP\n"
         f"{cp_lines}"
     )
+
+
+def format_moves_reply(entry: PokemonDexEntry) -> str:
+    number = f"No.{entry.id:03d}"
+    korean_name = entry.display_name if entry.display_name else entry.name
+    english_name = entry.name
+    form_name = ko_form(entry.form) if not _is_default_form(entry.form) else ""
+    if form_name:
+        korean_name = f"{korean_name} ({form_name})"
+    if entry.form and not _is_default_form(entry.form):
+        english_name = f"{english_name} ({entry.form.replace('_', ' ')})"
+
+    lines = [
+        f"{number} {korean_name} / {english_name}",
+        "[ 기술 ]",
+    ]
+    if entry.fast_moves:
+        lines.append(f"노말: {_format_move_list(entry.fast_moves)}")
+    if entry.charged_moves:
+        lines.append(f"스페셜: {_format_move_list(entry.charged_moves)}")
+    if entry.elite_fast_moves or entry.elite_charged_moves:
+        lines.append("")
+        lines.append("[ 레거시/대기머 기술 ]")
+        if entry.elite_fast_moves:
+            lines.append(f"노말: {_format_move_list(entry.elite_fast_moves)}")
+        if entry.elite_charged_moves:
+            lines.append(f"스페셜: {_format_move_list(entry.elite_charged_moves)}")
+    return "\n".join(lines)
+
+
+def _format_move_list(moves: list[str]) -> str:
+    return " / ".join(ko_move(move) for move in moves)
 
 
 def format_weakness_reply(entry: PokemonDexEntry) -> str:

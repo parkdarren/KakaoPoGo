@@ -1,4 +1,4 @@
-from app.pogo_api import PokemonDexEntry, format_dex_reply
+from app.pogo_api import PokemonDexEntry, format_dex_reply, format_moves_reply
 
 
 def test_dex_reply_uses_compact_cp_format_without_regular_moves() -> None:
@@ -70,5 +70,37 @@ def test_dex_reply_shows_only_elite_moves_when_available() -> None:
     assert "Thunder Shock" not in reply
     assert "Thunderbolt" not in reply
     assert "[ 레거시/대기머 기술 ]" in reply
-    assert "노말: Present" in reply
-    assert "스페셜: Surf" in reply
+    assert "노말: 프레젠트" in reply
+    assert "스페셜: 파도타기" in reply
+
+
+def test_moves_reply_uses_korean_move_names() -> None:
+    entry = PokemonDexEntry(
+        id=25,
+        name="Pikachu",
+        display_name="피카츄",
+        form=None,
+        types=["Electric"],
+        base_attack=112,
+        base_defense=96,
+        base_stamina=111,
+        fast_moves=["Thunder Shock", "Quick Attack"],
+        charged_moves=["Discharge", "Thunderbolt", "Wild Charge"],
+        elite_fast_moves=["Present"],
+        elite_charged_moves=["Surf", "Thunder"],
+        perfect_cps={},
+        weaknesses=["땅"],
+        resistances=[],
+        weather_boosts=["비"],
+    )
+
+    assert format_moves_reply(entry) == (
+        "No.025 피카츄 / Pikachu\n"
+        "[ 기술 ]\n"
+        "노말: 전기쇼크 / 전광석화\n"
+        "스페셜: 방전 / 10만볼트 / 와일드볼트\n"
+        "\n"
+        "[ 레거시/대기머 기술 ]\n"
+        "노말: 프레젠트\n"
+        "스페셜: 파도타기 / 번개"
+    )

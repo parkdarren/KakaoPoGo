@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 
@@ -32,15 +34,30 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _is_silent_message(text: str) -> bool:
+    return not text.strip().startswith("!")
+
+
+def _silent_response() -> dict[str, Any]:
+    return {"reply": "", "silent": True}
+
+
+def _reply_response(reply: str) -> dict[str, Any]:
+    return {"reply": reply, "silent": False}
+
+
 @app.post("/command")
-async def command(request: CommandRequest) -> dict[str, str]:
+async def command(request: CommandRequest) -> dict[str, Any]:
+    if _is_silent_message(request.text):
+        return _silent_response()
+
     response = await bot.handle(
         request.text,
         room=request.room,
         sender=request.sender,
         user_key=request.user_key,
     )
-    return {"reply": response.reply}
+    return _reply_response(response.reply)
 
 
 @app.get("/command")
@@ -49,9 +66,12 @@ async def command_get(
     room: str = "local",
     sender: str = "local",
     user_key: str | None = None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
+    if _is_silent_message(text):
+        return _silent_response()
+
     response = await bot.handle(text, room=room, sender=sender, user_key=user_key)
-    return {"reply": response.reply}
+    return _reply_response(response.reply)
 
 
 @app.get("/dex/{name}")

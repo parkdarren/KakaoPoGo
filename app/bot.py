@@ -8,6 +8,7 @@ from app.pogo_api import (
     PogoApiClient,
     format_custom_cp_reply,
     format_dex_reply,
+    format_moves_reply,
     format_perfect_cp_reply,
     format_weakness_reply,
 )
@@ -16,6 +17,7 @@ from app.pogo_api import (
 OWNER_SETUP_CODE = os.getenv("OWNER_SETUP_CODE", "change-me")
 PUBLIC_COMMANDS = [
     "!도감 피카츄",
+    "!스킬 피카츄",
     "!100 자시안 검왕",
     "!약점 기라티나 오리진",
     "!cp 피카츄 25 15/15/15",
@@ -57,6 +59,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "perfect", query
     if command in ("!약점", "!weak"):
         return "weakness", query
+    if command in ("!스킬", "!기술", "!skill", "!moves"):
+        return "moves", query
     if command in ("!cp",):
         return "cp", query
     if command in ("!오너등록", "!owner"):
@@ -207,6 +211,15 @@ class PokemonGoBot:
             except LookupError:
                 return BotResponse(f"'{query}' 포켓몬을 찾지 못했습니다.")
             return BotResponse(format_weakness_reply(entry))
+
+        if command == "moves":
+            if not query:
+                return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: !스킬 피카츄")
+            try:
+                entry = await self.pogo_client.get_dex_entry(query)
+            except LookupError:
+                return BotResponse(f"'{query}' 포켓몬을 찾지 못했습니다.")
+            return BotResponse(format_moves_reply(entry))
 
         if command == "cp":
             try:
@@ -406,7 +419,11 @@ class PokemonGoBot:
             "!약점 포켓몬이름",
             "예: !약점 디아루가 / !약점 기라티나 오리진",
             "",
-            "4. 원하는 레벨/개체값 CP 계산",
+            "4. 기술 보기",
+            "!스킬 포켓몬이름",
+            "예: !스킬 피카츄 / !스킬 디아루가",
+            "",
+            "5. 원하는 레벨/개체값 CP 계산",
             "!cp 포켓몬이름 레벨 공격/방어/체력",
             "예: !cp 피카츄 40 15/15/15",
         ]
@@ -467,6 +484,10 @@ class PokemonGoBot:
             "백",
             "약점",
             "weak",
+            "스킬",
+            "기술",
+            "skill",
+            "moves",
             "cp",
             "오너등록",
             "owner",

@@ -1,3 +1,12 @@
+from __future__ import annotations
+
+import json
+from functools import lru_cache
+from pathlib import Path
+
+
+DATA_DIR = Path(__file__).resolve().parent / "data"
+
 TYPE_KO = {
     "Normal": "노말",
     "Fire": "불꽃",
@@ -66,3 +75,15 @@ def ko_form(form_name: str | None) -> str:
     if not form_name:
         return ""
     return FORM_KO.get(form_name, form_name)
+
+
+@lru_cache(maxsize=1)
+def _load_move_names() -> dict[str, str]:
+    path = DATA_DIR / "korean_moves.json"
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def ko_move(move_name: str) -> str:
+    return _load_move_names().get(move_name, move_name)

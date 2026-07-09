@@ -30,7 +30,10 @@ function onMessage(msg) {
       .text();
 
     const data = JSON.parse(body);
-    msg.reply(data.reply || "Empty reply from server.");
+    if (!data || data.silent || !data.reply) {
+      return;
+    }
+    msg.reply(String(data.reply));
   } catch (error) {
     msg.reply(
       "KakaoPoGo server connection failed.\n" +

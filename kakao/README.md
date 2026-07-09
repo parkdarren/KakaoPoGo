@@ -42,6 +42,7 @@ Slash-prefixed messages are ignored by design.
 !도감 디아루가
 !도감 디아
 !도감 alg
+!스킬 피카츄
 !100 자시안 검왕
 !약점 기라티나 오리진
 !cp 피카츄 40 15/15/15

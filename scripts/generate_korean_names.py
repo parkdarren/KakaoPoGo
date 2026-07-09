@@ -23,6 +23,18 @@ def normalize_alias(value: str) -> str:
     return value.strip()
 
 
+def merge_aliases(existing: list[str], additions: list[str]) -> list[str]:
+    seen = set()
+    merged: list[str] = []
+    for alias in [*existing, *additions]:
+        normalized = normalize_alias(alias)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        merged.append(normalized)
+    return merged
+
+
 def load_pogo_species() -> dict[int, str]:
     response = httpx.get(POGO_STATS_URL, timeout=30)
     response.raise_for_status()
@@ -59,7 +71,7 @@ def build_mapping() -> dict[str, list[str]]:
         if korean_name:
             aliases.append(normalize_alias(korean_name))
 
-        mapping[english_name] = sorted(set(aliases))
+        mapping[english_name] = merge_aliases([], aliases)
 
     manual_aliases: dict[str, list[str]] = {
         "Pikachu": ["피카"],
@@ -69,9 +81,7 @@ def build_mapping() -> dict[str, list[str]]:
     for english_name, aliases in manual_aliases.items():
         if english_name not in mapping:
             continue
-        mapping[english_name] = sorted(
-            set(mapping[english_name]) | {normalize_alias(alias) for alias in aliases}
-        )
+        mapping[english_name] = merge_aliases(mapping[english_name], aliases)
 
     return mapping
 

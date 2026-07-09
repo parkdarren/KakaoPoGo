@@ -3,11 +3,14 @@ import pytest
 from app.admin_store import AdminStore
 from app.bot import parse_command, parse_cp_query
 from app.bot import PokemonGoBot
+from app.main import _is_silent_message
 
 
 def test_parse_new_commands() -> None:
     assert parse_command("!100 자시안 검왕") == ("perfect", "자시안 검왕")
     assert parse_command("!약점 기라티나 오리진") == ("weakness", "기라티나 오리진")
+    assert parse_command("!스킬 피카츄") == ("moves", "피카츄")
+    assert parse_command("!기술 디아루가") == ("moves", "디아루가")
     assert parse_command("!cp 피카츄 25 15/15/15") == ("cp", "피카츄 25 15/15/15")
     assert parse_command("!오너등록 change-me") == ("owner_setup", "change-me")
     assert parse_command("!관리자요청") == ("admin_request", "")
@@ -19,6 +22,8 @@ def test_parse_new_commands() -> None:
     assert parse_command("!도움말") == ("help", "")
     assert parse_command("/도감 피카츄") is None
     assert parse_command("/공지") is None
+    assert _is_silent_message("/도감 피카츄") is True
+    assert _is_silent_message("!도감 피카츄") is False
 
 
 def test_parse_cp_query_with_form_name() -> None:
