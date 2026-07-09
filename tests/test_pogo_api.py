@@ -104,3 +104,34 @@ def test_moves_reply_uses_korean_move_names() -> None:
         "노말: 프레젠트\n"
         "스페셜: 파도타기 / 번개"
     )
+
+
+def test_dex_reply_translates_elite_moves_to_korean() -> None:
+    entry = PokemonDexEntry(
+        id=646,
+        name="Kyurem",
+        display_name="큐레무",
+        form=None,
+        types=["Dragon", "Ice"],
+        base_attack=246,
+        base_defense=170,
+        base_stamina=245,
+        fast_moves=["Dragon Breath", "Steel Wing"],
+        charged_moves=["Dragon Claw", "Blizzard", "Draco Meteor"],
+        elite_fast_moves=[],
+        elite_charged_moves=["Glaciate"],
+        perfect_cps={
+            "Lv15 리서치": 1531,
+            "Lv20 레이드/알": 2041,
+            "Lv25 날씨부스트": 2552,
+            "Lv50 XL 최대": 4041,
+        },
+        weaknesses=["격투", "바위", "강철", "드래곤", "페어리"],
+        resistances=[],
+        weather_boosts=["눈", "강풍"],
+    )
+
+    reply = format_dex_reply(entry)
+
+    assert "Glaciate" not in reply
+    assert "스페셜: 얼어붙은세계" in reply

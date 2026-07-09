@@ -31,6 +31,18 @@ def test_korean_form_resolution() -> None:
     assert giratina.name == "Giratina"
     assert giratina.form == "Origin"
 
+    white_kyurem = resolver.resolve_query("화이트큐레무")
+    assert white_kyurem.name == "Kyurem"
+    assert white_kyurem.form == "White"
+
+    black_kyurem = resolver.resolve_query("블랙 큐레무")
+    assert black_kyurem.name == "Kyurem"
+    assert black_kyurem.form == "Black"
+
+    dusk_mane = resolver.resolve_query("황혼의갈기 네크로즈마")
+    assert dusk_mane.name == "Necrozma"
+    assert dusk_mane.form == "Dusk_mane"
+
     moltres = resolver.resolve_query("가라르 파이어")
     assert moltres.name == "Moltres"
     assert moltres.form == "Galarian"

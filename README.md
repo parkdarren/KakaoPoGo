@@ -26,7 +26,9 @@ weaknesses, forms, aliases, and room-specific custom commands.
 !도감 디아
 !도감 alg
 !도감 자시안 검왕
+!도감 화이트큐레무
 !스킬 피카츄
+!스킬 블랙큐레무
 !100 기라티나 오리진
 !약점 뮤츠
 !cp 피카츄 40 15/15/15
