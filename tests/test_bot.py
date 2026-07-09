@@ -53,7 +53,7 @@ async def test_owner_approves_admin_request(tmp_path) -> None:
         room="레이드방",
         sender="오너",
     )
-    assert owner.reply == "이 방의 owner로 등록됐어."
+    assert owner.reply == "이 방의 owner로 등록되었습니다."
 
     requester = await bot.handle(
         "!관리자요청",
@@ -68,7 +68,7 @@ async def test_owner_approves_admin_request(tmp_path) -> None:
         room="레이드방",
         sender="관리자후보",
     )
-    assert denied.reply == "이 명령어는 owner만 사용할 수 있어."
+    assert denied.reply == "이 명령어는 owner만 사용할 수 있습니다."
 
     pending = await bot.handle(
         "!관리자요청목록",
@@ -82,24 +82,24 @@ async def test_owner_approves_admin_request(tmp_path) -> None:
         room="레이드방",
         sender="오너",
     )
-    assert approved.reply == "관리자후보 님을 admin으로 등록했어."
+    assert approved.reply == "관리자후보 님을 admin으로 등록했습니다."
 
     listed = await bot.handle("!관리자목록", room="레이드방", sender="오너")
     assert "1. 오너: owner" in listed.reply
     assert "2. 관리자후보: admin" in listed.reply
 
     cannot_remove_owner = await bot.handle("!관리자삭제 1", room="레이드방", sender="오너")
-    assert cannot_remove_owner.reply == "owner는 관리자삭제로 삭제할 수 없어."
+    assert cannot_remove_owner.reply == "owner는 관리자삭제로 삭제할 수 없습니다."
 
     removed = await bot.handle("!관리자삭제 2", room="레이드방", sender="오너")
-    assert removed.reply == "관리자후보 님의 admin 권한을 삭제했어."
+    assert removed.reply == "관리자후보 님의 admin 권한을 삭제했습니다."
 
     duplicate = await bot.handle(
         "!관리자요청",
         room="레이드방",
         sender="관리자후보",
     )
-    assert "관리자 요청을 받았어." in duplicate.reply
+    assert "관리자 요청을 받았습니다." in duplicate.reply
 
 
 @pytest.mark.anyio
@@ -111,7 +111,7 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
         room="레이드방",
         sender="일반",
     )
-    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있어."
+    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
     await bot.handle("!오너등록 change-me", room="레이드방", sender="오너")
     saved = await bot.handle(
@@ -119,7 +119,7 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
         room="레이드방",
         sender="오너",
     )
-    assert saved.reply == "!공지 명령어를 저장했어."
+    assert saved.reply == "!공지 명령어를 저장했습니다."
 
     reply = await bot.handle("!공지", room="레이드방", sender="일반")
     assert reply.reply == "오늘 레이드 8시"
@@ -144,10 +144,10 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
     assert "!오너등록" not in owner_help.reply
 
     deleted = await bot.handle("!명령어삭제 공지", room="레이드방", sender="오너")
-    assert deleted.reply == "!공지 명령어를 삭제했어."
+    assert deleted.reply == "!공지 명령어를 삭제했습니다."
 
     missing = await bot.handle("!공지", room="레이드방", sender="일반")
-    assert missing.reply == "알 수 없는 명령어예요. !도움말 을 입력해줘."
+    assert missing.reply == "알 수 없는 명령어입니다. !도움말 을 입력해 주세요."
 
 
 @pytest.mark.anyio
@@ -162,7 +162,20 @@ async def test_owner_role_survives_user_key_upgrade(tmp_path) -> None:
         user_key="hash:stable-owner",
     )
 
-    assert saved.reply == "!공지 명령어를 저장했어."
+    assert saved.reply == "!공지 명령어를 저장했습니다."
+
+
+@pytest.mark.anyio
+async def test_owner_setup_replaces_existing_owner_instead_of_adding(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+
+    await bot.handle("!오너등록 change-me", room="레이드방", sender="이전오너")
+    replaced = await bot.handle("!오너등록 change-me", room="레이드방", sender="현재오너")
+
+    admins = store.list_admin_records("레이드방")
+    assert replaced.reply == "이 방의 owner가 현재 프로필로 변경되었습니다."
+    assert admins == [("현재오너", "owner", "sender:현재오너")]
 
 
 @pytest.mark.anyio
@@ -176,21 +189,21 @@ async def test_admin_can_manage_target_room_from_control_room(tmp_path) -> None:
         room="관리자방",
         sender="일반",
     )
-    assert denied.reply == "그 방의 owner 또는 admin으로 등록된 사람만 대상방을 설정할 수 있어."
+    assert denied.reply == "그 방의 owner 또는 admin으로 등록된 사람만 대상방을 설정할 수 있습니다."
 
     linked = await bot.handle(
         "!대상방설정 공개방",
         room="관리자방",
         sender="오너",
     )
-    assert linked.reply == "이 방의 관리 대상이 '공개방' 방으로 설정됐어."
+    assert linked.reply == "이 방의 관리 대상이 '공개방' 방으로 설정되었습니다."
 
     saved = await bot.handle(
         "!명령어추가 공지 공개방 공지입니다",
         room="관리자방",
         sender="오너",
     )
-    assert saved.reply == "!공지 명령어를 저장했어."
+    assert saved.reply == "!공지 명령어를 저장했습니다."
 
     public_reply = await bot.handle("!공지", room="공개방", sender="일반")
     assert public_reply.reply == "공개방 공지입니다"

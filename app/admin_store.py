@@ -160,6 +160,23 @@ class AdminStore:
     def add_owner(self, user: ChatUser) -> None:
         self._upsert_admin(user, "owner")
 
+    def replace_owner(self, user: ChatUser) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM room_admins WHERE room = ? AND role = 'owner'",
+                (user.room,),
+            )
+            conn.execute(
+                """
+                INSERT INTO room_admins (room, user_key, display_name, role)
+                VALUES (?, ?, ?, 'owner')
+                ON CONFLICT(room, user_key)
+                DO UPDATE SET display_name = excluded.display_name,
+                              role = 'owner'
+                """,
+                (user.room, user.user_key, user.sender),
+            )
+
     def add_admin(self, user: ChatUser) -> None:
         self._upsert_admin(user, "admin")
 
