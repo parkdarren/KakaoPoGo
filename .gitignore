@@ -1,0 +1,16 @@
+.cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+/data/
+*.sqlite3
+.idea/
+android/**/build/
+android/**/.gradle/
+android/**/local.properties
+android/**/*.apk
+android/**/*.aab

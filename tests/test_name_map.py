@@ -1,0 +1,44 @@
+from app.name_map import NameResolver
+
+
+def test_korean_name_resolution_for_common_pokemon() -> None:
+    resolver = NameResolver()
+
+    assert resolver.resolve("피카츄") == "Pikachu"
+    assert resolver.resolve("리자몽") == "Charizard"
+    assert resolver.resolve("뮤츠") == "Mewtwo"
+    assert resolver.resolve("자시안") == "Zacian"
+    assert resolver.resolve("자마젠타") == "Zamazenta"
+    assert resolver.resolve("레쿠자") == "Rayquaza"
+
+
+def test_korean_form_resolution() -> None:
+    resolver = NameResolver()
+
+    zacian = resolver.resolve_query("자시안 검왕")
+    assert zacian.name == "Zacian"
+    assert zacian.form == "Crowned_sword"
+
+    prefixed_zacian = resolver.resolve_query("검왕 자시안")
+    assert prefixed_zacian.name == "Zacian"
+    assert prefixed_zacian.form == "Crowned_sword"
+
+    zamazenta = resolver.resolve_query("자마젠타 방패왕")
+    assert zamazenta.name == "Zamazenta"
+    assert zamazenta.form == "Crowned_shield"
+
+    giratina = resolver.resolve_query("기라티나 오리진")
+    assert giratina.name == "Giratina"
+    assert giratina.form == "Origin"
+
+    moltres = resolver.resolve_query("가라르 파이어")
+    assert moltres.name == "Moltres"
+    assert moltres.form == "Galarian"
+
+
+def test_dialga_short_aliases() -> None:
+    resolver = NameResolver()
+
+    assert resolver.resolve("디아") == "Dialga"
+    assert resolver.resolve("alg") == "Dialga"
+    assert resolver.resolve("루가") == "Dialga"
