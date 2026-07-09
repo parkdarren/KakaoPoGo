@@ -267,8 +267,7 @@ class PokemonGoBot:
             if self.admin_store.is_owner(user):
                 self.admin_store.replace_owner(user)
                 return "이미 이 방의 owner로 등록되어 있습니다."
-            self.admin_store.replace_owner(user)
-            return "이 방의 owner가 현재 프로필로 변경되었습니다."
+            return "이 방에는 이미 owner가 등록되어 있습니다."
 
         self.admin_store.add_owner(user)
         return "이 방의 owner로 등록되었습니다."

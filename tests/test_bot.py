@@ -166,16 +166,16 @@ async def test_owner_role_survives_user_key_upgrade(tmp_path) -> None:
 
 
 @pytest.mark.anyio
-async def test_owner_setup_replaces_existing_owner_instead_of_adding(tmp_path) -> None:
+async def test_owner_setup_does_not_replace_existing_owner(tmp_path) -> None:
     store = AdminStore(tmp_path / "test.sqlite3")
     bot = PokemonGoBot(admin_store=store)
 
     await bot.handle("!오너등록 change-me", room="레이드방", sender="이전오너")
-    replaced = await bot.handle("!오너등록 change-me", room="레이드방", sender="현재오너")
+    blocked = await bot.handle("!오너등록 change-me", room="레이드방", sender="현재오너")
 
     admins = store.list_admin_records("레이드방")
-    assert replaced.reply == "이 방의 owner가 현재 프로필로 변경되었습니다."
-    assert admins == [("현재오너", "owner", "sender:현재오너")]
+    assert blocked.reply == "이 방에는 이미 owner가 등록되어 있습니다."
+    assert admins == [("이전오너", "owner", "sender:이전오너")]
 
 
 @pytest.mark.anyio
