@@ -8,6 +8,9 @@ function onMessage(msg) {
   }
 
   try {
+    const author = msg.author || {};
+    const sender = String(author.name || "");
+    const userKey = author.hash ? "hash:" + String(author.hash) : "";
     const url =
       SERVER_URL +
       "?text=" +
@@ -15,7 +18,9 @@ function onMessage(msg) {
       "&room=" +
       encodeURIComponent(String(msg.room || "")) +
       "&sender=" +
-      encodeURIComponent(String((msg.author && msg.author.name) || ""));
+      encodeURIComponent(sender) +
+      "&user_key=" +
+      encodeURIComponent(userKey);
 
     const body = org.jsoup.Jsoup.connect(url)
       .ignoreContentType(true)
@@ -35,7 +40,7 @@ function onMessage(msg) {
 }
 
 function isSupportedCommand(text) {
-  return text.indexOf("!") === 0 || text.indexOf("/") === 0;
+  return text.indexOf("!") === 0;
 }
 
 bot.addListener(Event.MESSAGE, onMessage);

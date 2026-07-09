@@ -1,7 +1,7 @@
 # KakaoTalk Runner Setup
 
 This folder contains KakaoTalk bridge scripts for Android notification-based bot
-runners. The runner listens to KakaoTalk notifications, sends supported commands
+runners. The runner listens to KakaoTalk notifications, sends supported `!` commands
 to the KakaoPoGo backend, and replies with the backend response.
 
 ## Scripts
@@ -32,6 +32,8 @@ VPS operation, replace it with the VPS public IP or domain.
 5. Paste the matching script from this folder.
 6. Save, compile, and turn the bot on.
 7. Keep the device awake enough for KakaoTalk and the runner to stay alive.
+
+Slash-prefixed messages are ignored by design.
 
 ## Public Test Commands
 

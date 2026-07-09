@@ -107,13 +107,49 @@ class AdminStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT role
+                SELECT user_key, role
                 FROM room_admins
                 WHERE room = ? AND user_key = ?
                 """,
                 (user.room, user.user_key),
             ).fetchone()
-        return row["role"] if row else None
+            if row:
+                return row["role"]
+
+            row = conn.execute(
+                """
+                SELECT user_key, role
+                FROM room_admins
+                WHERE room = ? AND display_name = ?
+                """,
+                (user.room, user.sender),
+            ).fetchone()
+            if row:
+                self._promote_admin_key(conn, user, row["user_key"])
+                return row["role"]
+        return None
+
+    @staticmethod
+    def _promote_admin_key(
+        conn: sqlite3.Connection,
+        user: ChatUser,
+        previous_user_key: str,
+    ) -> None:
+        if user.user_key == previous_user_key:
+            return
+        if user.user_key.startswith("sender:"):
+            return
+        try:
+            conn.execute(
+                """
+                UPDATE room_admins
+                SET user_key = ?, display_name = ?
+                WHERE room = ? AND user_key = ?
+                """,
+                (user.user_key, user.sender, user.room, previous_user_key),
+            )
+        except sqlite3.IntegrityError:
+            pass
 
     def is_owner(self, user: ChatUser) -> bool:
         return self.get_role(user) == "owner"

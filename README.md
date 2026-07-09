@@ -3,7 +3,7 @@
 Pokemon GO information bot for KakaoTalk open-chat communities.
 
 KakaoPoGo provides a FastAPI backend that receives chat-style commands and
-returns concise Korean replies for Pokemon GO lookups, perfect-IV CP tables,
+returns concise Korean replies for `!`-prefixed Pokemon GO lookups, perfect-IV CP tables,
 weaknesses, forms, aliases, and room-specific custom commands.
 
 ## Highlights
@@ -30,6 +30,8 @@ weaknesses, forms, aliases, and room-specific custom commands.
 !cp 피카츄 40 15/15/15
 !도움말
 ```
+
+Commands intentionally use `!` only. Slash-prefixed messages are ignored.
 
 Example dex reply:
 

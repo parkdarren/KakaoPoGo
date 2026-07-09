@@ -17,6 +17,8 @@ def test_parse_new_commands() -> None:
     assert parse_command("!대상방설정 레이드방") == ("target_set", "레이드방")
     assert parse_command("!대상방확인") == ("target_show", "")
     assert parse_command("!도움말") == ("help", "")
+    assert parse_command("/도감 피카츄") is None
+    assert parse_command("/공지") is None
 
 
 def test_parse_cp_query_with_form_name() -> None:
@@ -124,6 +126,7 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
 
     listed = await bot.handle("!명령어목록", room="레이드방", sender="일반")
     assert "!공지" in listed.reply
+    assert "!명령어목록" not in listed.reply
     assert "!명령어추가" not in listed.reply
     assert "!관리자승인" not in listed.reply
 
@@ -135,6 +138,7 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
     owner_help = await bot.handle("!도움말", room="레이드방", sender="오너")
     assert "!공지" in owner_help.reply
     assert "!도감 포켓몬이름" in owner_help.reply
+    assert "!명령어목록" not in owner_help.reply
     assert "!명령어추가" not in owner_help.reply
     assert "!관리자승인" not in owner_help.reply
     assert "!오너등록" not in owner_help.reply
@@ -144,6 +148,21 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
 
     missing = await bot.handle("!공지", room="레이드방", sender="일반")
     assert missing.reply == "알 수 없는 명령어예요. !도움말 을 입력해줘."
+
+
+@pytest.mark.anyio
+async def test_owner_role_survives_user_key_upgrade(tmp_path) -> None:
+    bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
+
+    await bot.handle("!오너등록 change-me", room="레이드방", sender="오너")
+    saved = await bot.handle(
+        "!명령어추가 공지 오늘 레이드 8시",
+        room="레이드방",
+        sender="오너",
+        user_key="hash:stable-owner",
+    )
+
+    assert saved.reply == "!공지 명령어를 저장했어."
 
 
 @pytest.mark.anyio

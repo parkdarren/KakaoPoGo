@@ -34,5 +34,5 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
 }
 
 function isSupportedCommand(text) {
-  return text.indexOf("!") === 0 || text.indexOf("/") === 0;
+  return text.indexOf("!") === 0;
 }

@@ -21,7 +21,6 @@ PUBLIC_COMMANDS = [
     "!cp 피카츄 25 15/15/15",
     "!관리자요청",
     "!도움말",
-    "!명령어목록",
 ]
 ADMIN_COMMANDS = [
     "!대상방설정 공개방이름",
@@ -52,41 +51,41 @@ def parse_command(text: str) -> tuple[str, str] | None:
 
     command = parts[0].lower()
     query = parts[1].strip() if len(parts) > 1 else ""
-    if command in ("!도감", "/도감", "!dex", "/dex"):
+    if command in ("!도감", "!dex"):
         return "dex", query
-    if command in ("!100", "/100", "!백", "/백"):
+    if command in ("!100", "!백"):
         return "perfect", query
-    if command in ("!약점", "/약점", "!weak", "/weak"):
+    if command in ("!약점", "!weak"):
         return "weakness", query
-    if command in ("!cp", "/cp"):
+    if command in ("!cp",):
         return "cp", query
-    if command in ("!오너등록", "/오너등록", "!owner", "/owner"):
+    if command in ("!오너등록", "!owner"):
         return "owner_setup", query
-    if command in ("!관리자요청", "/관리자요청"):
+    if command in ("!관리자요청",):
         return "admin_request", query
-    if command in ("!관리자요청목록", "/관리자요청목록"):
+    if command in ("!관리자요청목록",):
         return "admin_request_list", query
-    if command in ("!관리자승인", "/관리자승인"):
+    if command in ("!관리자승인",):
         return "admin_approve", query
-    if command in ("!관리자거절", "/관리자거절"):
+    if command in ("!관리자거절",):
         return "admin_reject", query
-    if command in ("!관리자목록", "/관리자목록"):
+    if command in ("!관리자목록",):
         return "admin_list", query
-    if command in ("!관리자삭제", "/관리자삭제"):
+    if command in ("!관리자삭제",):
         return "admin_remove", query
-    if command in ("!대상방설정", "/대상방설정"):
+    if command in ("!대상방설정",):
         return "target_set", query
-    if command in ("!대상방확인", "/대상방확인"):
+    if command in ("!대상방확인",):
         return "target_show", query
-    if command in ("!명령어추가", "/명령어추가", "!명령어수정", "/명령어수정"):
+    if command in ("!명령어추가", "!명령어수정"):
         return "custom_upsert", query
-    if command in ("!명령어삭제", "/명령어삭제"):
+    if command in ("!명령어삭제",):
         return "custom_delete", query
-    if command in ("!명령어목록", "/명령어목록"):
+    if command in ("!명령어목록",):
         return "custom_list", query
-    if command in ("!help", "!도움말", "/help", "/도움말"):
+    if command in ("!help", "!도움말"):
         return "help", ""
-    if command.startswith(("!", "/")) and len(command) > 1:
+    if command.startswith("!") and len(command) > 1:
         return "custom_run", command[1:]
     return None
 
@@ -267,7 +266,8 @@ class PokemonGoBot:
         if self.admin_store.has_owner(user.room):
             if self.admin_store.is_owner(user):
                 return "이미 이 방의 owner로 등록되어 있어."
-            return "이 방에는 이미 owner가 등록되어 있어."
+            self.admin_store.add_owner(user)
+            return "이 방의 owner로 추가 등록됐어."
 
         self.admin_store.add_owner(user)
         return "이 방의 owner로 등록됐어."
@@ -409,9 +409,6 @@ class PokemonGoBot:
             "4. 원하는 레벨/개체값 CP 계산",
             "!cp 포켓몬이름 레벨 공격/방어/체력",
             "예: !cp 피카츄 40 15/15/15",
-            "",
-            "5. 사용 가능한 명령어 목록 보기",
-            "!명령어목록",
         ]
 
         custom_commands = self.admin_store.list_custom_commands(user.room)
