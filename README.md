@@ -97,6 +97,21 @@ const SERVER_URL = "http://YOUR_SERVER_IP:8000/command";
 const BRIDGE_KEY = "YOUR_BRIDGE_KEY";   // 서버 BRIDGE_KEY 환경변수와 동일하게
 ```
 
+카카오톡 채널 챗봇으로 연결할 때는 챗봇 관리자센터에서 스킬을 만들고,
+스킬 URL을 서버의 채널 엔드포인트로 등록합니다:
+
+```text
+http://YOUR_SERVER_IP:8000/kakao/skill
+```
+
+이 엔드포인트는 카카오 챗봇의 `userRequest.utterance` 값을 읽어 기존 봇
+명령어와 같은 방식으로 처리한 뒤, 카카오 말풍선 JSON(`simpleText`)으로
+응답합니다. `/도움말`, `/명령어`, `/도감 피카츄`, `/스킬 피카츄`,
+`/100 디아루가` 같은 기본 기능을 그대로 쓸 수 있습니다.
+
+관리자센터에서 HTTPS 주소만 허용되는 환경이라면 도메인과 SSL을 붙인 뒤
+같은 경로(`/kakao/skill`)를 등록하면 됩니다.
+
 VPS 배포는 [deploy/IWINV_VPS.md](deploy/IWINV_VPS.md) 참고. 환경변수는 두 개입니다:
 
 - `BRIDGE_KEY` — 폰과 서버가 공유하는 인증 키. 설정하면 이 키가 담긴

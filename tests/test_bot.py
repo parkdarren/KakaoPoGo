@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from app.admin_store import AdminStore
 from app.bot import DATA_UNAVAILABLE_MESSAGE, parse_command, parse_cp_query
 from app.bot import PokemonGoBot
-from app.main import _is_silent_message, app, command_get
+from app.main import _is_silent_message, _split_kakao_text, app, command_get
 from app.pogo_api import MegaUnavailableError, PogoDataUnavailableError
 
 
@@ -79,6 +79,73 @@ def test_command_stays_open_without_bridge_key(monkeypatch) -> None:
 
     response = client.get("/command", params={"text": "!x"})
     assert response.status_code == 200
+
+
+def test_kakao_skill_returns_simple_text_response() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/kakao/skill",
+        json={
+            "userRequest": {
+                "utterance": "/도움말",
+                "user": {"id": "channel-user-1"},
+            },
+            "bot": {"id": "pogo-channel", "name": "KakaoPoGo"},
+            "action": {"params": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"] == "2.0"
+    outputs = body["template"]["outputs"]
+    assert 1 <= len(outputs) <= 3
+    assert "【 가르치기 목록 】" in outputs[0]["simpleText"]["text"]
+    assert "/도감 포켓몬이름" in outputs[0]["simpleText"]["text"]
+    assert body["template"]["quickReplies"][0]["messageText"] == "/도움말"
+
+
+def test_kakao_skill_uses_action_params_when_utterance_is_missing() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/kakao/skill",
+        json={
+            "userRequest": {"user": {"id": "channel-user-1"}},
+            "bot": {"id": "pogo-channel"},
+            "action": {"params": {"command": "/도움말"}},
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+    assert "/스킬 포켓몬이름" in text
+
+
+def test_kakao_skill_guides_non_slash_messages() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/kakao/skill",
+        json={
+            "userRequest": {"utterance": "안녕하세요", "user": {"id": "channel-user-1"}},
+            "bot": {"id": "pogo-channel"},
+            "action": {"params": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+    assert text == "명령어는 /로 시작해 주세요.\n예: /도감 피카츄"
+
+
+def test_kakao_text_split_keeps_response_inside_kakao_limits() -> None:
+    chunks = _split_kakao_text("가" * 3500)
+
+    assert len(chunks) == 3
+    assert all(len(chunk) <= 1000 for chunk in chunks)
+    assert "일부만 표시했습니다" in chunks[-1]
 
 
 @pytest.mark.anyio
