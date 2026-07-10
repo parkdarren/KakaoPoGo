@@ -1,44 +1,26 @@
 # KakaoPoGo
 
-Pokemon GO information bot for KakaoTalk open-chat communities.
+카카오톡 포켓몬고 오픈채팅방에서 굴리는 정보 봇입니다.
+방에서 `/도감 디아루가` 라고 치면 타입, 약점, 100% 개체값 CP를 바로 답해줍니다.
 
-KakaoPoGo provides a FastAPI backend that receives chat-style commands and
-returns concise Korean replies for `/`-prefixed Pokemon GO lookups, perfect-IV CP tables,
-weaknesses, forms, aliases, and room-specific custom commands.
+## 왜 만들었나
 
-## Highlights
+레이드 시간이 되면 방에 "디아루가 100퍼 몇이에요?", "뮤츠 약점 뭐죠?" 같은
+질문이 하루에도 몇 번씩 올라옵니다. 그때마다 누군가 검색해서 스크린샷을 찍어
+올리는 게 반복되길래, 채팅에서 바로 답해주는 봇을 만들었습니다. 지금도 실제
+방에서 돌고 있습니다.
 
-- Pokemon GO dex lookup with Korean names and common form names.
-- Compact 100% IV CP output for research, raid, weather-boosted raid, and Lv50.
-- Type and weakness lookup for raid preparation.
-- Korean move lookup for normal, special, and legacy/Elite TM moves.
-- Custom CP calculator by level and IV spread.
-- Short aliases such as `디아`, `alg`, and `루가` for frequent room searches.
-- Role-based owner/admin management for room custom commands.
-- Public `/도움말` output that excludes owner/admin-only commands.
-- Room-specific custom commands with `/명령어등록`, `/명령어수정`, and `/명령어삭제`.
-- KakaoTalk bridge scripts for MessengerBotR-style notification bot runners.
-- Optional Android notification bridge project.
+## 스크린샷
 
-## Command Examples
+<!--
+TODO: 실제 카톡 대화 캡처를 docs/screenshots/ 에 넣고 아래 주석을 해제하세요.
+개인정보(프로필 사진, 닉네임)는 가리고 올리는 걸 권장합니다.
 
-```text
-/도감 디아루가
-/도감 디아
-/도감 alg
-/도감 자시안 검왕
-/도감 화이트큐레무
-/스킬 피카츄
-/스킬 블랙큐레무
-/100 기라티나 오리진
-/약점 뮤츠
-/cp 피카츄 40 15/15/15
-/도움말
-```
+![도감 조회](docs/screenshots/dex.png)
+![도움말](docs/screenshots/help.png)
+-->
 
-Commands intentionally use `/` only. Exclamation-prefixed messages are ignored.
-
-Example dex reply:
+실제 응답은 이런 모양입니다:
 
 ```text
 No.483 디아루가 / Dialga
@@ -52,141 +34,117 @@ No.483 디아루가 / Dialga
 최대 Lv50: 4565 CP
 ```
 
-If a Pokemon has legacy or Elite TM moves, only those special moves are shown in
-the dex reply. Regular moves are intentionally omitted to keep chat output short.
-
-Example move reply:
+## 뭘 할 수 있나
 
 ```text
-No.025 피카츄 / Pikachu
-[ 기술 ]
-노말: 전기쇼크 / 전광석화
-스페셜: 방전 / 10만볼트 / 와일드볼트
-
-[ 레거시/대기머 기술 ]
-노말: 프레젠트
-스페셜: 파도타기 / 번개
+/도감 디아루가          타입, 약점, 100% CP 요약
+/도감 자시안 검왕       폼 이름도 알아듣습니다 (오리진, 어나더, 블랙, 가라르 ...)
+/스킬 피카츄            기술 목록을 한글명으로 (레거시/대기머 기술 구분)
+/100 기라티나 오리진    100% 개체값 CP만 빠르게
+/약점 뮤츠              타입 상성 (약점 / 저항)
+/cp 피카츄 40 15/15/15  원하는 레벨·개체값의 CP 계산
+/도움말                 방에 등록된 명령어까지 포함한 전체 목록
 ```
 
-## Architecture
+`디아`, `alg` 같은 방에서 실제로 쓰는 줄임말도 알아듣고, 부분 일치도 됩니다.
+
+방장(오너)과 관리자는 방마다 자유 명령어를 가르칠 수 있습니다:
 
 ```text
-KakaoTalk room
-    -> Android bot runner notification hook
-    -> KakaoPoGo FastAPI backend
-    -> PoGo API data + local Korean name map + SQLite admin/custom-command store
-    -> plain-text KakaoTalk reply
+/명령어등록 공지 오늘 레이드 8시
+/공지                   -> "오늘 레이드 8시"
 ```
 
-The backend is responsible for all command parsing, Pokemon data lookup, CP
-calculation, permission checks, and response formatting. The KakaoTalk runner is
-kept thin: it forwards messages to `/command` and posts the returned reply.
+관리자 승인/삭제, 개인방에서 공개방을 원격 관리하는 대상방 설정 같은
+운영 명령어도 있습니다. 전체 목록은 오너/관리자가 `/명령어목록` 으로 볼 수 있습니다.
 
-## Tech Stack
+## 어떻게 굴러가나
 
-- Python 3
-- FastAPI
-- httpx
-- SQLite
-- pytest
-- PoGo API community dataset
-- MessengerBotR-compatible JavaScript bridge
-- Optional native Android bridge app
+```text
+카톡 오픈채팅방
+  -> 봇 전용 폰의 MessengerBotR (카톡 알림을 후킹)
+  -> FastAPI 백엔드 (VPS, /command)
+  -> pogoapi.net 데이터 + 한글 이름 매핑 + SQLite (권한/커스텀 명령어)
+  -> 텍스트 답장
+```
 
-## Local Setup
+폰 쪽 스크립트는 최대한 얇게 유지합니다. 메시지를 서버로 넘기고 답장을
+그대로 뿌리는 것만 하고, 명령어 해석·권한·CP 계산은 전부 서버가 합니다.
+폰 스크립트 업데이트가 서버 배포보다 훨씬 귀찮기 때문입니다.
+
+## 직접 돌려보기
+
+Python 3.11+ 기준입니다.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-```
-
-Run the backend:
-
-```powershell
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-For owner/admin setup, configure a private `OWNER_SETUP_CODE`. See
-`.env.example` for the expected variable name.
-
-Open:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-Test a command:
+로컬에서 명령을 던져보려면:
 
 ```powershell
-Invoke-RestMethod `
-  -Uri "http://127.0.0.1:8000/command?text=/dex%20Dialga&room=local&sender=test"
+Invoke-RestMethod "http://127.0.0.1:8000/command?text=/도감%20피카츄"
 ```
 
-## KakaoTalk Bridge
-
-Use one of the scripts in `kakao/` with a MessengerBotR-style runner:
-
-- `kakao/messengerbotr_console.js` for the newer BotManager/Event API.
-- `kakao/messengerbotr.js` for the classic `response(...)` API.
-- `kakao/chat_auto_reply_bot.js` for compatible auto-reply bot runners.
-
-Before pasting a script into the runner, set:
+카톡에 연결하려면 `kakao/` 의 스크립트 하나를 MessengerBotR류 앱에 붙여넣고
+위쪽 두 상수를 채웁니다:
 
 ```javascript
 const SERVER_URL = "http://YOUR_SERVER_IP:8000/command";
-const BRIDGE_KEY = "YOUR_BRIDGE_KEY";
+const BRIDGE_KEY = "YOUR_BRIDGE_KEY";   // 서버 BRIDGE_KEY 환경변수와 동일하게
 ```
 
-`BRIDGE_KEY` must match the server's `BRIDGE_KEY` environment variable. When
-the server has a key configured, requests without the matching `X-Bridge-Key`
-header are rejected, so random internet traffic cannot drive the bot.
+VPS 배포는 [deploy/IWINV_VPS.md](deploy/IWINV_VPS.md) 참고. 환경변수는 두 개입니다:
 
-For Android runner setup notes, see `kakao/README.md`.
+- `BRIDGE_KEY` — 폰과 서버가 공유하는 인증 키. 설정하면 이 키가 담긴
+  `X-Bridge-Key` 헤더 없는 요청은 전부 403으로 거절합니다.
+- `OWNER_SETUP_CODE` — `/오너등록` 용 비밀 코드. 비워두거나 기본값이면
+  오너 등록 자체가 잠깁니다.
 
-## Deployment
+## 운영하면서 겪은 것들
 
-An Ubuntu VPS is enough for early operation. The recommended deployment path is:
+**카톡 닉네임은 신원이 아니다.** 처음에는 보낸 사람 닉네임으로 관리자를
+알아봤는데, 닉네임은 누구나 순식간에 바꿀 수 있습니다. 지금은 MessengerBotR이
+주는 프로필 hash를 신원 키로 쓰고, 닉네임 매칭은 hash가 없던 시절의 옛
+레코드를 새 키로 옮겨주는 용도로만 남겼습니다. hash 키가 붙은 관리자는
+닉네임을 똑같이 바꿔도 사칭이 안 됩니다.
 
-1. Create a small Ubuntu VPS.
-2. Open inbound TCP `8000`.
-3. Upload the project.
-4. Set `OWNER_SETUP_CODE` to a private value.
-5. Set `BRIDGE_KEY` to a private value shared with the bridge script.
-6. Run the setup script in `deploy/vps_setup.sh`.
-7. Point the KakaoTalk bridge script to the VPS command endpoint.
+**서버를 인터넷에 그냥 열어두면 안 된다.** 처음엔 `/command` 가 그대로 열려
+있었습니다. 주소만 알면 누구든 카톡 없이 오너 행세를 할 수 있는 구조라,
+폰 스크립트와 서버가 비밀 키를 공유하는 `X-Bridge-Key` 헤더 인증을 넣었습니다.
 
-Detailed notes are in `deploy/IWINV_VPS.md`.
+**오너 등록 코드의 기본값이 함정이었다.** 등록 코드 기본값(`change-me`)이
+저장소에 그대로 공개돼 있어서, 서버 설정을 깜빡하면 아무나 먼저 오너를
+선점할 수 있었습니다. 지금은 기본값이면 등록이 아예 잠깁니다.
 
-## Data
+**pogoapi.net은 가끔 죽는다.** 데이터 원본이 죽으면 봇이 통째로 500을 뱉었는데,
+지금은 만료된 캐시라도 있으면 그걸로 계속 답하고 5분에 한 번만 재접속을
+시도합니다. 캐시조차 없으면 "잠시 후 다시 시도해 주세요"라고 답합니다.
 
-Pokemon GO data is fetched from the community PoGo API and cached under
-`.cache/pogoapi`. Korean Pokemon and move names are stored in:
+**명령어 접두사는 `/` 하나만 받는다.** 오픈채팅에는 봇이 여러 개 있는 경우가
+많고 `!` 는 다른 봇들과 자주 겹칩니다. `/` 로 시작하지 않는 메시지는 서버가
+조용히 무시해서(silent 응답) 일반 대화에 봇이 끼어들지 않습니다.
 
-```text
-app/data/korean_names.json
-app/data/korean_moves.json
-```
+**한글 이름은 결국 수작업이다.** pogoapi 데이터는 전부 영어라서 포켓몬/기술
+한글명은 `scripts/generate_korean_*.py` 로 매핑 json을 생성해 씁니다. 다만
+"오리진", "검왕", "화이트큐레무" 같은 폼 별칭은 자동화가 안 돼서
+`app/name_map.py` 에서 손으로 관리합니다. 신규 포켓몬이 한글로 안 찾아지면
+대부분 여기에 별칭을 추가하면 됩니다.
 
-Regenerate the Korean name map:
+## 한계
+
+- 카카오 공식 API가 아닙니다. 알림 후킹 방식이라 봇 전용 폰이 항상 켜져
+  있어야 하고, 카톡 알림에 안 뜨는 메시지는 봇도 못 봅니다.
+- 오픈채팅 자동화는 스팸처럼 보이지 않게 보수적으로 운영해야 합니다.
+- 실제 서버 IP, 등록 코드, 브리지 키, DB 파일은 커밋하지 않습니다.
+
+## 개발
 
 ```powershell
-python scripts/generate_korean_names.py
-python scripts/generate_korean_moves.py
+python -m pytest          # 명령어 파싱, CP 계산, 권한, 캐시 폴백 등 30+개
+python scripts/generate_korean_names.py   # 한글 이름 매핑 재생성
+python scripts/generate_korean_moves.py   # 한글 기술명 매핑 재생성
 ```
-
-## Tests
-
-```powershell
-python -m pytest
-```
-
-The test suite covers command parsing, CP calculation, Korean name/form and move
-resolution, compact dex formatting, and owner/admin command behavior.
-
-## Notes
-
-- KakaoTalk open-chat automation is not an official Kakao OpenChat API flow.
-- Keep the runner account and room behavior conservative to avoid spam-like use.
-- Do not commit real server IPs, owner setup codes, database files, APKs, or
-  Android local build files.

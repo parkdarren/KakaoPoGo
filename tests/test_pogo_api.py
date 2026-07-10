@@ -1,4 +1,120 @@
-from app.pogo_api import PokemonDexEntry, format_dex_reply, format_moves_reply
+import os
+import time
+
+import httpx
+import pytest
+
+from app.pogo_api import (
+    CACHE_TTL_SECONDS,
+    MegaUnavailableError,
+    PogoApiClient,
+    PogoDataUnavailableError,
+    PokemonDexEntry,
+    format_dex_reply,
+    format_moves_reply,
+)
+
+
+MEGA_FIXTURES = {
+    "mega_pokemon.json": [
+        {
+            "mega_name": "Mega Charizard X",
+            "pokemon_id": 6,
+            "pokemon_name": "Charizard",
+            "stats": {"base_attack": 273, "base_defense": 213, "base_stamina": 186},
+            "type": ["Fire", "Dragon"],
+        },
+        {
+            "mega_name": "Mega Charizard Y",
+            "pokemon_id": 6,
+            "pokemon_name": "Charizard",
+            "stats": {"base_attack": 319, "base_defense": 212, "base_stamina": 186},
+            "type": ["Fire", "Flying"],
+        },
+    ],
+    "current_pokemon_moves.json": [
+        {
+            "pokemon_name": "Charizard",
+            "form": "Normal",
+            "fast_moves": ["Fire Spin"],
+            "charged_moves": ["Blast Burn"],
+            "elite_fast_moves": [],
+            "elite_charged_moves": [],
+        }
+    ],
+    "type_effectiveness.json": {},
+    "weather_boosts.json": {},
+}
+
+
+@pytest.mark.anyio
+async def test_mega_dex_entry_uses_mega_stats_and_types(tmp_path, monkeypatch) -> None:
+    client = PogoApiClient(cache_dir=tmp_path)
+
+    async def fake_fetch(endpoint: str):
+        return MEGA_FIXTURES[endpoint]
+
+    monkeypatch.setattr(client, "_fetch_json", fake_fetch)
+
+    mega_y = await client.get_dex_entry("메가리자몽Y")
+    assert mega_y.form == "Mega_Y"
+    assert mega_y.types == ["Fire", "Flying"]
+    assert mega_y.base_attack == 319
+    assert mega_y.fast_moves == ["Fire Spin"]
+
+    default_variant = await client.get_dex_entry("메가리자몽")
+    assert default_variant.form == "Mega_X"
+
+    with pytest.raises(MegaUnavailableError):
+        await client.get_dex_entry("메가뮤츠")
+
+
+@pytest.mark.anyio
+async def test_fetch_json_serves_from_memory_after_first_load(tmp_path) -> None:
+    client = PogoApiClient(cache_dir=tmp_path)
+    cache_file = tmp_path / "pokemon_stats.json"
+    cache_file.write_text('[{"pokemon_name": "Pikachu"}]', encoding="utf-8")
+
+    first = await client._fetch_json("pokemon_stats.json")
+    cache_file.unlink()
+    second = await client._fetch_json("pokemon_stats.json")
+
+    assert first == second == [{"pokemon_name": "Pikachu"}]
+
+
+@pytest.mark.anyio
+async def test_fetch_json_falls_back_to_stale_cache_when_api_is_down(
+    tmp_path, monkeypatch
+) -> None:
+    client = PogoApiClient(cache_dir=tmp_path)
+    cache_file = tmp_path / "pokemon_stats.json"
+    cache_file.write_text('[{"pokemon_name": "Pikachu"}]', encoding="utf-8")
+    expired = time.time() - CACHE_TTL_SECONDS - 100
+    os.utime(cache_file, (expired, expired))
+
+    async def failing_download(endpoint: str):
+        raise httpx.ConnectError("api down")
+
+    monkeypatch.setattr(client, "_download", failing_download)
+
+    data = await client._fetch_json("pokemon_stats.json")
+
+    assert data == [{"pokemon_name": "Pikachu"}]
+
+
+@pytest.mark.anyio
+async def test_fetch_json_raises_when_api_is_down_and_no_cache(
+    tmp_path, monkeypatch
+) -> None:
+    client = PogoApiClient(cache_dir=tmp_path)
+
+    async def failing_download(endpoint: str):
+        raise httpx.ConnectError("api down")
+
+    monkeypatch.setattr(client, "_download", failing_download)
+
+    with pytest.raises(PogoDataUnavailableError):
+        await client._fetch_json("pokemon_stats.json")
 
 
 def test_dex_reply_uses_compact_cp_format_without_regular_moves() -> None:

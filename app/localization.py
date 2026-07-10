@@ -40,6 +40,9 @@ WEATHER_KO = {
 
 FORM_KO = {
     "Normal": "",
+    "Mega": "메가",
+    "Mega_X": "메가 X",
+    "Mega_Y": "메가 Y",
     "Hero": "역전의용사",
     "Crowned_sword": "검왕",
     "Crowned_shield": "방패왕",

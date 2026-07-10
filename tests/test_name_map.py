@@ -54,3 +54,32 @@ def test_dialga_short_aliases() -> None:
     assert resolver.resolve("디아") == "Dialga"
     assert resolver.resolve("alg") == "Dialga"
     assert resolver.resolve("루가") == "Dialga"
+
+
+def test_partial_name_picks_first_by_dex_order() -> None:
+    resolver = NameResolver()
+
+    # 앞글자 일치 중 도감 번호가 가장 앞선 포켓몬을 고른다.
+    assert resolver.resolve("메") == "Ditto"  # 메타몽
+    assert resolver.resolve("가디") == "Growlithe"
+    # 앞글자 일치(리자몽 계열)가 부분 포함보다 우선한다.
+    assert resolver.resolve("리자") == "Charmeleon"  # 리자드
+
+
+def test_mega_prefix_resolution() -> None:
+    resolver = NameResolver()
+
+    mewtwo = resolver.resolve_query("메가뮤츠")
+    assert mewtwo.name == "Mewtwo"
+    assert mewtwo.mega is True
+    assert mewtwo.mega_variant is None
+
+    charizard_y = resolver.resolve_query("메가리자몽Y")
+    assert charizard_y.name == "Charizard"
+    assert charizard_y.mega is True
+    assert charizard_y.mega_variant == "Y"
+
+    # 이름 자체가 '메가'로 시작하는 포켓몬은 메가진화로 오해하지 않는다.
+    meganium = resolver.resolve_query("메가니움")
+    assert meganium.name == "Meganium"
+    assert meganium.mega is False

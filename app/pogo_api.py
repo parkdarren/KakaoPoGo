@@ -10,12 +10,22 @@ import httpx
 
 from app.cp import FALLBACK_CPM, calculate_cp, perfect_cp_table
 from app.localization import ko_form, ko_move, ko_type, ko_weather
-from app.name_map import NameResolver
+from app.name_map import NameResolver, ResolvedPokemon
 
 
 BASE_URL = "https://pogoapi.net/api/v1"
 CACHE_DIR = Path(".cache") / "pogoapi"
 CACHE_TTL_SECONDS = 60 * 60 * 24
+# 원본 API 장애로 만료된 캐시를 임시로 계속 쓸 때의 재시도 간격.
+STALE_RETRY_SECONDS = 60 * 5
+
+
+class PogoDataUnavailableError(RuntimeError):
+    """pogoapi.net에 접근할 수 없고 쓸 수 있는 캐시도 없을 때."""
+
+
+class MegaUnavailableError(LookupError):
+    """포켓몬은 있지만 해당 메가진화가 포켓몬GO에 아직 없을 때."""
 FORM_PRIORITY = {
     None: 0,
     "Normal": 0,
@@ -49,9 +59,16 @@ class PogoApiClient:
     def __init__(self, cache_dir: Path = CACHE_DIR) -> None:
         self.cache_dir = cache_dir
         self.name_resolver = NameResolver()
+        self._client: httpx.AsyncClient | None = None
+        # endpoint -> (만료 시각, 파싱된 데이터). 디스크/네트워크는 만료 후에만 접근한다.
+        self._memory_cache: dict[str, tuple[float, Any]] = {}
+        # endpoint -> 소문자 이름 -> 레코드 목록. 데이터가 갱신되면 버린다.
+        self._name_indexes: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
     async def get_dex_entry(self, query: str) -> PokemonDexEntry:
         resolved = self.name_resolver.resolve_query(query)
+        if resolved.mega:
+            return await self._get_mega_entry(resolved)
         stats = await self._find_by_name(
             "pokemon_stats.json",
             resolved.name,
@@ -107,24 +124,132 @@ class PogoApiClient:
             weather_boosts=self._weather_for_types(pokemon_types, weather_boosts),
         )
 
+    async def _get_mega_entry(self, resolved: ResolvedPokemon) -> PokemonDexEntry:
+        records = await self._fetch_json("mega_pokemon.json")
+        matches = [
+            item
+            for item in records
+            if item["pokemon_name"].lower() == resolved.name.lower()
+        ]
+        if not matches:
+            raise MegaUnavailableError(f"Mega Pokemon not found: {resolved.name}")
+
+        if resolved.mega_variant:
+            variant_suffix = f" {resolved.mega_variant.lower()}"
+            matches = [
+                item
+                for item in matches
+                if item["mega_name"].lower().endswith(variant_suffix)
+            ]
+            if not matches:
+                raise MegaUnavailableError(
+                    f"Mega form not found: {resolved.name} {resolved.mega_variant}"
+                )
+
+        # 리자몽/뮤츠처럼 X와 Y가 있는데 변형을 지정하지 않으면 X를 보여준다.
+        mega = sorted(matches, key=lambda item: item["mega_name"])[0]
+        moves = await self._find_by_name(
+            "current_pokemon_moves.json",
+            resolved.name,
+        )
+        cpm_by_level = await self._get_cp_multipliers()
+        type_effectiveness = await self._fetch_json("type_effectiveness.json")
+        weather_boosts = await self._fetch_json("weather_boosts.json")
+
+        pokemon_types = mega.get("type", [])
+        weaknesses, resistances = self._calculate_matchups(
+            pokemon_types,
+            type_effectiveness,
+        )
+        stats = mega["stats"]
+        base_attack = int(stats["base_attack"])
+        base_defense = int(stats["base_defense"])
+        base_stamina = int(stats["base_stamina"])
+
+        return PokemonDexEntry(
+            id=int(mega["pokemon_id"]),
+            name=mega["pokemon_name"],
+            display_name=self.name_resolver.display_name(resolved.name),
+            form=self._mega_form(mega["mega_name"], mega["pokemon_name"]),
+            types=pokemon_types,
+            base_attack=base_attack,
+            base_defense=base_defense,
+            base_stamina=base_stamina,
+            fast_moves=moves.get("fast_moves", []),
+            charged_moves=moves.get("charged_moves", []),
+            elite_fast_moves=moves.get("elite_fast_moves", []),
+            elite_charged_moves=moves.get("elite_charged_moves", []),
+            perfect_cps=perfect_cp_table(
+                base_attack,
+                base_defense,
+                base_stamina,
+                cpm_by_level,
+            ),
+            weaknesses=weaknesses,
+            resistances=resistances,
+            weather_boosts=self._weather_for_types(pokemon_types, weather_boosts),
+        )
+
+    @staticmethod
+    def _mega_form(mega_name: str, pokemon_name: str) -> str:
+        variant = mega_name.replace("Mega", "").replace(pokemon_name, "").strip()
+        return f"Mega_{variant.upper()}" if variant else "Mega"
+
     async def _fetch_json(self, endpoint: str) -> Any:
+        now = time.time()
+        cached = self._memory_cache.get(endpoint)
+        if cached and now < cached[0]:
+            return cached[1]
+
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path = self.cache_dir / endpoint
+        disk_mtime: float | None = None
         if cache_path.exists():
-            age = time.time() - cache_path.stat().st_mtime
-            if age < CACHE_TTL_SECONDS:
-                return json.loads(cache_path.read_text(encoding="utf-8"))
+            disk_mtime = cache_path.stat().st_mtime
+            if now - disk_mtime < CACHE_TTL_SECONDS:
+                data = json.loads(cache_path.read_text(encoding="utf-8"))
+                self._store(endpoint, data, expires_at=disk_mtime + CACHE_TTL_SECONDS)
+                return data
 
-        async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.get(f"{BASE_URL}/{endpoint}")
-            response.raise_for_status()
-            data = response.json()
+        try:
+            data = await self._download(endpoint)
+        except (httpx.HTTPError, OSError) as error:
+            # 원본 API 장애 시에는 만료된 캐시라도 계속 서비스하고,
+            # 잠시 후에만 재다운로드를 시도한다.
+            stale = cached[1] if cached else None
+            if stale is None and disk_mtime is not None:
+                stale = json.loads(cache_path.read_text(encoding="utf-8"))
+            if stale is not None:
+                self._store(endpoint, stale, expires_at=now + STALE_RETRY_SECONDS)
+                return stale
+            raise PogoDataUnavailableError(endpoint) from error
 
         cache_path.write_text(
             json.dumps(data, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        self._store(endpoint, data, expires_at=now + CACHE_TTL_SECONDS)
         return data
+
+    async def _download(self, endpoint: str) -> Any:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=20)
+        response = await self._client.get(f"{BASE_URL}/{endpoint}")
+        response.raise_for_status()
+        return response.json()
+
+    def _store(self, endpoint: str, data: Any, expires_at: float) -> None:
+        self._memory_cache[endpoint] = (expires_at, data)
+        self._name_indexes.pop(endpoint, None)
+
+    def _name_index(self, endpoint: str, records: Any) -> dict[str, list[dict[str, Any]]]:
+        index = self._name_indexes.get(endpoint)
+        if index is None:
+            index = {}
+            for item in records:
+                index.setdefault(self._record_name(item).lower(), []).append(item)
+            self._name_indexes[endpoint] = index
+        return index
 
     async def _find_by_name(
         self,
@@ -133,11 +258,7 @@ class PogoApiClient:
         form: str | None = None,
     ) -> dict[str, Any]:
         records = await self._fetch_json(endpoint)
-        matches = [
-            item
-            for item in records
-            if self._record_name(item).lower() == name.lower()
-        ]
+        matches = self._name_index(endpoint, records).get(name.lower(), [])
         if not matches:
             raise LookupError(f"Pokemon not found: {name}")
         if form:

@@ -2,9 +2,20 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.admin_store import AdminStore
-from app.bot import parse_command, parse_cp_query
+from app.bot import DATA_UNAVAILABLE_MESSAGE, parse_command, parse_cp_query
 from app.bot import PokemonGoBot
 from app.main import _is_silent_message, app, command_get
+from app.pogo_api import MegaUnavailableError, PogoDataUnavailableError
+
+
+class UnavailablePogoClient:
+    async def get_dex_entry(self, query: str):
+        raise PogoDataUnavailableError("pokemon_stats.json")
+
+
+class MegaUnavailablePogoClient:
+    async def get_dex_entry(self, query: str):
+        raise MegaUnavailableError(query)
 
 
 def test_parse_new_commands() -> None:
@@ -62,6 +73,32 @@ def test_command_stays_open_without_bridge_key(monkeypatch) -> None:
 
     response = client.get("/command", params={"text": "!x"})
     assert response.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_dex_reports_friendly_message_when_data_unavailable(tmp_path) -> None:
+    bot = PokemonGoBot(
+        pogo_client=UnavailablePogoClient(),
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+
+    reply = await bot.handle("/도감 피카츄", room="레이드방", sender="일반")
+
+    assert reply.reply == DATA_UNAVAILABLE_MESSAGE
+
+
+@pytest.mark.anyio
+async def test_dex_explains_unreleased_mega(tmp_path) -> None:
+    bot = PokemonGoBot(
+        pogo_client=MegaUnavailablePogoClient(),
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+
+    reply = await bot.handle("/도감 메가뮤츠", room="레이드방", sender="일반")
+
+    assert reply.reply == "'메가뮤츠' 메가진화는 아직 포켓몬GO에 없습니다."
 
 
 def test_parse_cp_query_with_form_name() -> None:

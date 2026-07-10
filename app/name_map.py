@@ -87,6 +87,8 @@ def _normalize(value: str) -> str:
 class ResolvedPokemon:
     name: str
     form: str | None = None
+    mega: bool = False
+    mega_variant: str | None = None
 
 
 class NameResolver:
@@ -101,7 +103,11 @@ class NameResolver:
     def _load_aliases(self) -> dict[str, str]:
         raw = json.loads(self.path.read_text(encoding="utf-8"))
         aliases: dict[str, str] = {}
-        for canonical, values in raw.items():
+        # korean_names.json은 도감 번호 순서라 부분 일치 시 '가장 앞' 포켓몬을
+        # 고르는 기준으로 쓴다.
+        self.name_order: dict[str, int] = {}
+        for order, (canonical, values) in enumerate(raw.items()):
+            self.name_order[canonical] = order
             self.display_names[canonical] = values[0] if values else canonical
             aliases[_normalize(canonical)] = canonical
             for value in values:
@@ -128,11 +134,33 @@ class NameResolver:
         if exact_name:
             return ResolvedPokemon(exact_name)
 
+        mega = self._resolve_mega(normalized)
+        if mega:
+            return mega
+
         partial_name = self._resolve_partial_name(normalized)
         if partial_name:
             return ResolvedPokemon(partial_name)
 
         return ResolvedPokemon(query.strip())
+
+    def _resolve_mega(self, normalized_query: str) -> ResolvedPokemon | None:
+        # '메가니움'처럼 이름 자체가 메가로 시작하는 포켓몬은 위의 정확 일치가
+        # 먼저 잡으므로 여기까지 오지 않는다.
+        for prefix in ("메가", "mega"):
+            if not normalized_query.startswith(prefix):
+                continue
+            rest = normalized_query[len(prefix) :]
+            if not rest:
+                return None
+            variant = None
+            if rest[-1] in ("x", "y"):
+                variant = rest[-1].upper()
+                rest = rest[:-1]
+            name = self.aliases.get(rest) or self._resolve_partial_name(rest)
+            if name:
+                return ResolvedPokemon(name, mega=True, mega_variant=variant)
+        return None
 
     @staticmethod
     def _load_form_aliases() -> dict[str, str]:
@@ -175,14 +203,23 @@ class NameResolver:
         )
 
     def _resolve_partial_name(self, normalized_query: str) -> str | None:
-        if len(normalized_query) < 2:
+        # 한글은 한 글자에도 정보가 충분하지만 영문 한 글자는 소음에 가깝다.
+        if not normalized_query or (
+            len(normalized_query) < 2 and normalized_query.isascii()
+        ):
             return None
 
-        matched_names = {
-            name
-            for alias, name in self.aliases.items()
-            if alias.startswith(normalized_query) or normalized_query in alias
-        }
-        if len(matched_names) == 1:
-            return next(iter(matched_names))
+        prefix_names: set[str] = set()
+        contains_names: set[str] = set()
+        for alias, name in self.aliases.items():
+            if alias.startswith(normalized_query):
+                prefix_names.add(name)
+            elif normalized_query in alias:
+                contains_names.add(name)
+
+        # 앞글자 일치를 우선하고, 같은 그룹 안에서는 도감 번호가 가장
+        # 앞선 포켓몬을 고른다. 예: '메' -> 메타몽, '디아' -> 디아루가
+        for names in (prefix_names, contains_names):
+            if names:
+                return min(names, key=lambda name: self.name_order.get(name, 10**9))
         return None

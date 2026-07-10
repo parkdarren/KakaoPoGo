@@ -2,16 +2,34 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import date
 
 from app.admin_store import AdminStore, ChatUser
 from app.pogo_api import (
+    MegaUnavailableError,
     PogoApiClient,
+    PogoDataUnavailableError,
     format_custom_cp_reply,
     format_dex_reply,
     format_moves_reply,
     format_perfect_cp_reply,
     format_weakness_reply,
 )
+
+
+DATA_UNAVAILABLE_MESSAGE = (
+    "포켓몬 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+)
+# 날짜에 따라 하나씩 돌아가며 /도움말 첫 줄에 붙는다.
+HELP_GREETINGS = [
+    "오늘도 즐거운 포켓몬고 하세요!",
+    "레이드 가기 전에 명령어 한번 훑고 가세요.",
+    "궁금한 포켓몬은 /도감 으로 바로 확인!",
+    "오늘은 100% 개체값 뜨는 날입니다.",
+    "색이 다른 포켓몬이 기다리고 있을지도?",
+    "알 까기 좋은 날씨네요.",
+    "포획운 가득한 하루 되세요!",
+]
 
 
 OWNER_SETUP_CODE = os.getenv("OWNER_SETUP_CODE", "")
@@ -224,8 +242,12 @@ class PokemonGoBot:
                 return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: /도감 피카츄")
             try:
                 entry = await self.pogo_client.get_dex_entry(query)
+            except MegaUnavailableError:
+                return BotResponse(f"'{query}' 메가진화는 아직 포켓몬GO에 없습니다.")
             except LookupError:
                 return BotResponse(f"'{query}' 포켓몬을 찾지 못했습니다. 한글명 매핑을 추가해야 할 수도 있습니다.")
+            except PogoDataUnavailableError:
+                return BotResponse(DATA_UNAVAILABLE_MESSAGE)
             return BotResponse(format_dex_reply(entry))
 
         if command == "perfect":
@@ -233,8 +255,12 @@ class PokemonGoBot:
                 return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: /100 자시안")
             try:
                 entry = await self.pogo_client.get_dex_entry(query)
+            except MegaUnavailableError:
+                return BotResponse(f"'{query}' 메가진화는 아직 포켓몬GO에 없습니다.")
             except LookupError:
                 return BotResponse(f"'{query}' 포켓몬을 찾지 못했습니다.")
+            except PogoDataUnavailableError:
+                return BotResponse(DATA_UNAVAILABLE_MESSAGE)
             return BotResponse(format_perfect_cp_reply(entry))
 
         if command == "weakness":
@@ -242,8 +268,12 @@ class PokemonGoBot:
                 return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: /약점 기라티나 오리진")
             try:
                 entry = await self.pogo_client.get_dex_entry(query)
+            except MegaUnavailableError:
+                return BotResponse(f"'{query}' 메가진화는 아직 포켓몬GO에 없습니다.")
             except LookupError:
                 return BotResponse(f"'{query}' 포켓몬을 찾지 못했습니다.")
+            except PogoDataUnavailableError:
+                return BotResponse(DATA_UNAVAILABLE_MESSAGE)
             return BotResponse(format_weakness_reply(entry))
 
         if command == "moves":
@@ -251,8 +281,12 @@ class PokemonGoBot:
                 return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: /스킬 피카츄")
             try:
                 entry = await self.pogo_client.get_dex_entry(query)
+            except MegaUnavailableError:
+                return BotResponse(f"'{query}' 메가진화는 아직 포켓몬GO에 없습니다.")
             except LookupError:
                 return BotResponse(f"'{query}' 포켓몬을 찾지 못했습니다.")
+            except PogoDataUnavailableError:
+                return BotResponse(DATA_UNAVAILABLE_MESSAGE)
             return BotResponse(format_moves_reply(entry))
 
         if command == "cp":
@@ -262,8 +296,12 @@ class PokemonGoBot:
                 return BotResponse("형식은 이렇게 입력해 주세요. 예: /cp 피카츄 25 15/15/15")
             try:
                 entry = await self.pogo_client.get_dex_entry(pokemon_query)
+            except MegaUnavailableError:
+                return BotResponse(f"'{pokemon_query}' 메가진화는 아직 포켓몬GO에 없습니다.")
             except LookupError:
                 return BotResponse(f"'{pokemon_query}' 포켓몬을 찾지 못했습니다.")
+            except PogoDataUnavailableError:
+                return BotResponse(DATA_UNAVAILABLE_MESSAGE)
             return BotResponse(format_custom_cp_reply(entry, level, *ivs))
 
         return BotResponse(self._handle_command_list(target_user))
@@ -452,7 +490,8 @@ class PokemonGoBot:
         return self._handle_command_list(user, target_room)
 
     def _handle_public_help(self, user: ChatUser) -> str:
-        lines = ["【 가르치기 목록 】", "━━━━━━━━━━━━━━━━"]
+        greeting = HELP_GREETINGS[date.today().toordinal() % len(HELP_GREETINGS)]
+        lines = [greeting, "", "【 가르치기 목록 】", "━━━━━━━━━━━━━━━━"]
         index = 1
         for custom in self.admin_store.list_custom_command_records(user.room):
             lines.extend(
