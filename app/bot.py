@@ -308,7 +308,6 @@ class PokemonGoBot:
             [
                 "권한 확인",
                 f"방: {user.room}",
-                f"프로필: {user.sender}",
                 f"권한: {role}",
             ]
         )

@@ -238,6 +238,7 @@ async def test_global_owner_can_manage_room_when_profile_matches(tmp_path) -> No
     assert saved.reply == "!공지 명령어를 저장했습니다."
     assert "권한: owner" in role.reply
     assert "식별 방식" not in role.reply
+    assert "프로필:" not in role.reply
 
 
 @pytest.mark.anyio
