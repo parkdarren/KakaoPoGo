@@ -58,6 +58,7 @@ class PokemonGoEvent:
     start: datetime
     end: datetime
     link: str = ""
+    featured_pokemon: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,9 @@ class PokemonGoEventClient:
                     start=start,
                     end=end,
                     link=str(item.get("link") or ""),
+                    featured_pokemon=tuple(
+                        _extract_featured_pokemon(item, self.name_resolver)
+                    ),
                 )
             )
         if not events:
@@ -246,6 +250,8 @@ def _format_event_section(
         type_name = EVENT_TYPE_KO.get(event.event_type, event.event_type)
         lines.append(f"{index}. [{type_name}] {event.name}")
         lines.append(f"└ 기간: {_format_period(event.start, event.end)}")
+        if event.featured_pokemon:
+            lines.append(f"└ 출현 포켓몬: {', '.join(event.featured_pokemon)}")
     if len(events) > limit:
         lines.append(f"외 {len(events) - limit}개 일정이 더 있습니다.")
     lines.append("")
@@ -316,6 +322,87 @@ def _format_raid_boss(boss: RaidBoss, resolver: NameResolver) -> str:
     if boss.cp_normal_max:
         return f"{name}({boss.cp_normal_max})"
     return name
+
+
+def _extract_featured_pokemon(item: dict[str, object], resolver: NameResolver) -> list[str]:
+    extra = item.get("extraData")
+    if not isinstance(extra, dict):
+        return []
+
+    names: list[str] = []
+    community_day = extra.get("communityday")
+    if isinstance(community_day, dict):
+        _append_named_entries(names, community_day.get("spawns"), resolver)
+
+    spotlight = extra.get("spotlight")
+    if isinstance(spotlight, dict):
+        before_spotlight = len(names)
+        _append_named_entries(names, spotlight.get("list"), resolver)
+        if len(names) == before_spotlight:
+            _append_named_entries(names, [spotlight], resolver)
+
+    raid_battles = extra.get("raidbattles")
+    if isinstance(raid_battles, dict):
+        event_name = str(item.get("name") or "")
+        raid_names = _entry_names(raid_battles.get("bosses"))
+        for raid_name in raid_names:
+            if "shadow" in event_name.lower() and not raid_name.lower().startswith("shadow "):
+                raid_name = f"Shadow {raid_name}"
+            _append_unique(names, _translate_pokemon_name(raid_name, resolver))
+
+    if not names:
+        names.extend(_extract_featured_from_title(str(item.get("name") or ""), resolver))
+
+    return names[:8]
+
+
+def _append_named_entries(
+    target: list[str],
+    value: object,
+    resolver: NameResolver,
+) -> None:
+    for name in _entry_names(value):
+        _append_unique(target, _translate_pokemon_name(name, resolver))
+
+
+def _entry_names(value: object) -> list[str]:
+    if isinstance(value, dict):
+        name = str(value.get("name") or "").strip()
+        return [name] if name else []
+    if not isinstance(value, list):
+        return []
+
+    names: list[str] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def _append_unique(target: list[str], value: str) -> None:
+    if value and value not in target:
+        target.append(value)
+
+
+def _extract_featured_from_title(name: str, resolver: NameResolver) -> list[str]:
+    rules = [
+        (r"^Dynamax (?P<name>.+?) during Max Monday$", "다이맥스 "),
+        (r"^(?P<name>.+?) Raid Hour$", ""),
+        (r"^(?P<name>.+?) Spotlight Hour$", ""),
+        (r"^(?P<name>.+?) Community Day$", ""),
+    ]
+    for pattern, prefix in rules:
+        matched = re.match(pattern, name.strip(), flags=re.IGNORECASE)
+        if not matched:
+            continue
+        pokemon_name = matched.group("name").strip()
+        if not pokemon_name:
+            return []
+        return [f"{prefix}{_translate_pokemon_name(pokemon_name, resolver)}"]
+    return []
 
 
 def _translate_pokemon_name(name: str, resolver: NameResolver) -> str:

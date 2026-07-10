@@ -1,6 +1,13 @@
 from datetime import datetime
 
-from app.events import KST, PokemonGoEvent, RaidBoss, format_event_schedule
+from app.events import (
+    KST,
+    PokemonGoEvent,
+    RaidBoss,
+    _extract_featured_pokemon,
+    format_event_schedule,
+)
+from app.name_map import NameResolver
 
 
 def test_event_schedule_shows_upcoming_dates_and_current_raids() -> None:
@@ -17,6 +24,7 @@ def test_event_schedule_shows_upcoming_dates_and_current_raids() -> None:
             event_type="pokemon-go-fest",
             start=datetime(2026, 7, 11, 10, 0, tzinfo=KST),
             end=datetime(2026, 7, 12, 18, 0, tzinfo=KST),
+            featured_pokemon=("뮤츠", "주뱃"),
         ),
         PokemonGoEvent(
             name="Outside Window",
@@ -49,6 +57,7 @@ def test_event_schedule_shows_upcoming_dates_and_current_raids() -> None:
     assert "[예정 이벤트]" in reply
     assert "1. [GO Fest] Pokemon GO Fest 2026: Global" in reply
     assert "└ 기간: 7/11(토) 10:00 ~ 7/12(일) 18:00" in reply
+    assert "└ 출현 포켓몬: 뮤츠, 주뱃" in reply
     assert "Outside Window" not in reply
     assert "메가: 메가 팬텀(1644/2055)" in reply
     assert "5성: 자시안 검왕(2188/2735)" in reply
@@ -62,3 +71,35 @@ def test_event_schedule_handles_empty_window() -> None:
 
     assert "[진행 중]\n표시할 일정이 없습니다." in reply
     assert "[예정 이벤트]\n표시할 일정이 없습니다." in reply
+
+
+def test_extract_featured_pokemon_translates_event_data() -> None:
+    resolver = NameResolver()
+    event = {
+        "name": "Shadow Palkia in Shadow Raids",
+        "extraData": {
+            "communityday": {"spawns": [{"name": "Nickit"}]},
+            "spotlight": {"list": [{"name": "Zubat"}]},
+            "raidbattles": {"bosses": [{"name": "Palkia"}]},
+        },
+    }
+
+    names = _extract_featured_pokemon(event, resolver)
+
+    assert names == ["훔처우", "주뱃", "그림자 펄기아"]
+
+
+def test_extract_featured_pokemon_from_event_title() -> None:
+    resolver = NameResolver()
+
+    max_monday = _extract_featured_pokemon(
+        {"name": "Dynamax Deino during Max Monday", "extraData": {"generic": {}}},
+        resolver,
+    )
+    raid_hour = _extract_featured_pokemon(
+        {"name": "Kyogre Raid Hour", "extraData": {"generic": {}}},
+        resolver,
+    )
+
+    assert max_monday == ["다이맥스 모노두"]
+    assert raid_hour == ["가이오가"]
