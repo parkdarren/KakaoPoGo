@@ -4,6 +4,11 @@ const SCRIPT_VERSION = "kakaopogo-2026-07-10-silent-v2";
 
 function onMessage(msg) {
   const text = String(msg.content || "").trim();
+  if (text === "!스크립트버전" || text === "!봇버전") {
+    msg.reply("KakaoPoGo script " + SCRIPT_VERSION);
+    return;
+  }
+
   if (!isSupportedCommand(text)) {
     return;
   }

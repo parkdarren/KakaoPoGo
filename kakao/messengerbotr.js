@@ -7,6 +7,11 @@ const SERVER_URL = "http://YOUR_SERVER_IP:8000/command";
 
 function response(room, msg, sender, isGroupChat, replier, imageDB, packageName) {
   const text = String(msg || "").trim();
+  if (text === "!스크립트버전" || text === "!봇버전") {
+    replier.reply("KakaoPoGo script " + SCRIPT_VERSION);
+    return;
+  }
+
   if (!isSupportedCommand(text)) {
     return;
   }
