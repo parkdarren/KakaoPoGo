@@ -7,30 +7,30 @@ from app.main import _is_silent_message, command_get
 
 
 def test_parse_new_commands() -> None:
-    assert parse_command("!100 자시안 검왕") == ("perfect", "자시안 검왕")
-    assert parse_command("!약점 기라티나 오리진") == ("weakness", "기라티나 오리진")
-    assert parse_command("!스킬 피카츄") == ("moves", "피카츄")
-    assert parse_command("!기술 디아루가") == ("moves", "디아루가")
-    assert parse_command("!cp 피카츄 25 15/15/15") == ("cp", "피카츄 25 15/15/15")
-    assert parse_command("!오너등록 change-me") == ("owner_setup", "change-me")
-    assert parse_command("!관리자요청") == ("admin_request", "")
-    assert parse_command("!권한확인") == ("role_check", "")
-    assert parse_command("!관리자승인 1") == ("admin_approve", "1")
-    assert parse_command("!명령어등록 공지 내용") == ("custom_upsert", "공지 내용")
-    assert parse_command("!명령어추가 공지 내용") == ("custom_upsert", "공지 내용")
-    assert parse_command("!공지") == ("custom_run", "공지")
-    assert parse_command("!대상방설정 레이드방") == ("target_set", "레이드방")
-    assert parse_command("!대상방확인") == ("target_show", "")
-    assert parse_command("!도움말") == ("help", "")
-    assert parse_command("/도감 피카츄") is None
-    assert parse_command("/공지") is None
-    assert _is_silent_message("/도감 피카츄") is True
-    assert _is_silent_message("!도감 피카츄") is False
+    assert parse_command("/100 자시안 검왕") == ("perfect", "자시안 검왕")
+    assert parse_command("/약점 기라티나 오리진") == ("weakness", "기라티나 오리진")
+    assert parse_command("/스킬 피카츄") == ("moves", "피카츄")
+    assert parse_command("/기술 디아루가") == ("moves", "디아루가")
+    assert parse_command("/cp 피카츄 25 15/15/15") == ("cp", "피카츄 25 15/15/15")
+    assert parse_command("/오너등록 change-me") == ("owner_setup", "change-me")
+    assert parse_command("/관리자요청") == ("admin_request", "")
+    assert parse_command("/권한확인") == ("role_check", "")
+    assert parse_command("/관리자승인 1") == ("admin_approve", "1")
+    assert parse_command("/명령어등록 공지 내용") == ("custom_upsert", "공지 내용")
+    assert parse_command("/명령어추가 공지 내용") == ("custom_upsert", "공지 내용")
+    assert parse_command("/공지") == ("custom_run", "공지")
+    assert parse_command("/대상방설정 레이드방") == ("target_set", "레이드방")
+    assert parse_command("/대상방확인") == ("target_show", "")
+    assert parse_command("/도움말") == ("help", "")
+    assert parse_command("!도감 피카츄") is None
+    assert parse_command("!공지") is None
+    assert _is_silent_message("/도감 피카츄") is False
+    assert _is_silent_message("!도감 피카츄") is True
 
 
 @pytest.mark.anyio
-async def test_slash_command_returns_silent_response() -> None:
-    response = await command_get("/도감 피카츄", room="레이드방", sender="일반")
+async def test_exclamation_command_returns_silent_response() -> None:
+    response = await command_get("!도감 피카츄", room="레이드방", sender="일반")
 
     assert response == {"reply": "", "silent": True}
 
@@ -63,14 +63,14 @@ async def test_owner_approves_admin_request(tmp_path) -> None:
     bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
 
     owner = await bot.handle(
-        "!오너등록 change-me",
+        "/오너등록 change-me",
         room="레이드방",
         sender="오너",
     )
     assert owner.reply == "이 방의 owner로 등록되었습니다."
 
     requester = await bot.handle(
-        "!관리자요청",
+        "/관리자요청",
         room="레이드방",
         sender="관리자후보",
     )
@@ -78,38 +78,38 @@ async def test_owner_approves_admin_request(tmp_path) -> None:
     request_id = int(requester.reply.rsplit(":", maxsplit=1)[1].strip())
 
     denied = await bot.handle(
-        "!관리자요청목록",
+        "/관리자요청목록",
         room="레이드방",
         sender="관리자후보",
     )
     assert denied.reply == "이 명령어는 owner만 사용할 수 있습니다."
 
     pending = await bot.handle(
-        "!관리자요청목록",
+        "/관리자요청목록",
         room="레이드방",
         sender="오너",
     )
     assert f"{request_id}. 관리자후보" in pending.reply
 
     approved = await bot.handle(
-        f"!관리자승인 {request_id}",
+        f"/관리자승인 {request_id}",
         room="레이드방",
         sender="오너",
     )
     assert approved.reply == "관리자후보 님을 admin으로 등록했습니다."
 
-    listed = await bot.handle("!관리자목록", room="레이드방", sender="오너")
+    listed = await bot.handle("/관리자목록", room="레이드방", sender="오너")
     assert "1. 오너: owner" in listed.reply
     assert "2. 관리자후보: admin" in listed.reply
 
-    cannot_remove_owner = await bot.handle("!관리자삭제 1", room="레이드방", sender="오너")
+    cannot_remove_owner = await bot.handle("/관리자삭제 1", room="레이드방", sender="오너")
     assert cannot_remove_owner.reply == "owner는 관리자삭제로 삭제할 수 없습니다."
 
-    removed = await bot.handle("!관리자삭제 2", room="레이드방", sender="오너")
+    removed = await bot.handle("/관리자삭제 2", room="레이드방", sender="오너")
     assert removed.reply == "관리자후보 님의 admin 권한을 삭제했습니다."
 
     duplicate = await bot.handle(
-        "!관리자요청",
+        "/관리자요청",
         room="레이드방",
         sender="관리자후보",
     )
@@ -121,63 +121,63 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
     bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
 
     denied = await bot.handle(
-        "!명령어추가 공지 오늘 레이드 8시",
+        "/명령어추가 공지 오늘 레이드 8시",
         room="레이드방",
         sender="일반",
     )
     assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
-    await bot.handle("!오너등록 change-me", room="레이드방", sender="오너")
+    await bot.handle("/오너등록 change-me", room="레이드방", sender="오너")
     saved = await bot.handle(
-        "!명령어등록 공지 오늘 레이드 8시",
+        "/명령어등록 공지 오늘 레이드 8시",
         room="레이드방",
         sender="오너",
     )
-    assert saved.reply == "!공지 명령어를 저장했습니다."
+    assert saved.reply == "/공지 명령어를 저장했습니다."
 
-    reply = await bot.handle("!공지", room="레이드방", sender="일반")
+    reply = await bot.handle("/공지", room="레이드방", sender="일반")
     assert reply.reply == "오늘 레이드 8시"
 
-    listed = await bot.handle("!명령어목록", room="레이드방", sender="일반")
-    assert "!공지" in listed.reply
-    assert "!명령어목록" not in listed.reply
-    assert "!명령어추가" not in listed.reply
-    assert "!관리자승인" not in listed.reply
+    listed = await bot.handle("/명령어목록", room="레이드방", sender="일반")
+    assert "/공지" in listed.reply
+    assert "/명령어목록" not in listed.reply
+    assert "/명령어추가" not in listed.reply
+    assert "/관리자승인" not in listed.reply
 
-    owner_listed = await bot.handle("!명령어목록", room="레이드방", sender="오너")
-    assert "!공지" in owner_listed.reply
-    assert "!명령어등록 공지 내용" in owner_listed.reply
-    assert "!명령어추가 공지 내용" in owner_listed.reply
-    assert "!관리자승인 번호" in owner_listed.reply
+    owner_listed = await bot.handle("/명령어목록", room="레이드방", sender="오너")
+    assert "/공지" in owner_listed.reply
+    assert "/명령어등록 공지 내용" in owner_listed.reply
+    assert "/명령어추가 공지 내용" in owner_listed.reply
+    assert "/관리자승인 번호" in owner_listed.reply
 
-    owner_help = await bot.handle("!도움말", room="레이드방", sender="오너")
-    assert "!공지" in owner_help.reply
-    assert "!도감 포켓몬이름" in owner_help.reply
-    assert "!명령어목록" not in owner_help.reply
-    assert "!명령어추가" not in owner_help.reply
-    assert "!관리자승인" not in owner_help.reply
-    assert "!오너등록" not in owner_help.reply
+    owner_help = await bot.handle("/도움말", room="레이드방", sender="오너")
+    assert "/공지" in owner_help.reply
+    assert "/도감 포켓몬이름" in owner_help.reply
+    assert "/명령어목록" not in owner_help.reply
+    assert "/명령어추가" not in owner_help.reply
+    assert "/관리자승인" not in owner_help.reply
+    assert "/오너등록" not in owner_help.reply
 
-    deleted = await bot.handle("!명령어삭제 공지", room="레이드방", sender="오너")
-    assert deleted.reply == "!공지 명령어를 삭제했습니다."
+    deleted = await bot.handle("/명령어삭제 공지", room="레이드방", sender="오너")
+    assert deleted.reply == "/공지 명령어를 삭제했습니다."
 
-    missing = await bot.handle("!공지", room="레이드방", sender="일반")
-    assert missing.reply == "알 수 없는 명령어입니다. !도움말 을 입력해 주세요."
+    missing = await bot.handle("/공지", room="레이드방", sender="일반")
+    assert missing.reply == "알 수 없는 명령어입니다. /도움말 을 입력해 주세요."
 
 
 @pytest.mark.anyio
 async def test_owner_role_survives_user_key_upgrade(tmp_path) -> None:
     bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
 
-    await bot.handle("!오너등록 change-me", room="레이드방", sender="오너")
+    await bot.handle("/오너등록 change-me", room="레이드방", sender="오너")
     saved = await bot.handle(
-        "!명령어추가 공지 오늘 레이드 8시",
+        "/명령어추가 공지 오늘 레이드 8시",
         room="레이드방",
         sender="오너",
         user_key="hash:stable-owner",
     )
 
-    assert saved.reply == "!공지 명령어를 저장했습니다."
+    assert saved.reply == "/공지 명령어를 저장했습니다."
 
 
 @pytest.mark.anyio
@@ -186,12 +186,12 @@ async def test_owner_setup_does_not_replace_existing_owner(tmp_path) -> None:
     bot = PokemonGoBot(admin_store=store)
 
     await bot.handle(
-        "!오너등록 change-me",
+        "/오너등록 change-me",
         room="레이드방",
         sender="이전오너",
         user_key="hash:previous-owner",
     )
-    blocked = await bot.handle("!오너등록 change-me", room="레이드방", sender="현재오너")
+    blocked = await bot.handle("/오너등록 change-me", room="레이드방", sender="현재오너")
 
     admins = store.list_admin_records("레이드방")
     assert blocked.reply == "이 방에는 이미 owner가 등록되어 있습니다."
@@ -203,9 +203,9 @@ async def test_owner_setup_does_not_upgrade_different_legacy_owner(tmp_path) -> 
     store = AdminStore(tmp_path / "test.sqlite3")
     bot = PokemonGoBot(admin_store=store)
 
-    await bot.handle("!오너등록 change-me", room="레이드방", sender="예전오너")
+    await bot.handle("/오너등록 change-me", room="레이드방", sender="예전오너")
     blocked = await bot.handle(
-        "!오너등록 change-me",
+        "/오너등록 change-me",
         room="레이드방",
         sender="현재오너",
         user_key="hash:stable-owner",
@@ -222,25 +222,25 @@ async def test_hash_owner_is_recognized_globally(tmp_path) -> None:
     bot = PokemonGoBot(admin_store=store)
 
     await bot.handle(
-        "!오너등록 change-me",
+        "/오너등록 change-me",
         room="개인방",
         sender="오너",
         user_key="hash:owner",
     )
     saved = await bot.handle(
-        "!명령어등록 공지 전역 오너 테스트",
+        "/명령어등록 공지 전역 오너 테스트",
         room="공개방",
         sender="오너",
         user_key="hash:owner",
     )
     role = await bot.handle(
-        "!권한확인",
+        "/권한확인",
         room="공개방",
         sender="오너",
         user_key="hash:owner",
     )
 
-    assert saved.reply == "!공지 명령어를 저장했습니다."
+    assert saved.reply == "/공지 명령어를 저장했습니다."
     assert "권한: owner" in role.reply
     assert "식별 방식" not in role.reply
     assert "프로필:" not in role.reply
@@ -250,32 +250,32 @@ async def test_hash_owner_is_recognized_globally(tmp_path) -> None:
 async def test_admin_can_manage_target_room_from_control_room(tmp_path) -> None:
     bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
 
-    await bot.handle("!오너등록 change-me", room="관리자방", sender="오너")
+    await bot.handle("/오너등록 change-me", room="관리자방", sender="오너")
 
     denied = await bot.handle(
-        "!대상방설정 공개방",
+        "/대상방설정 공개방",
         room="관리자방",
         sender="일반",
     )
     assert denied.reply == "owner 또는 admin만 대상방을 설정할 수 있습니다."
 
     linked = await bot.handle(
-        "!대상방설정 공개방",
+        "/대상방설정 공개방",
         room="관리자방",
         sender="오너",
     )
     assert linked.reply == "이 방의 관리 대상이 '공개방' 방으로 설정되었습니다."
 
     saved = await bot.handle(
-        "!명령어추가 공지 공개방 공지입니다",
+        "/명령어추가 공지 공개방 공지입니다",
         room="관리자방",
         sender="오너",
     )
-    assert saved.reply == "!공지 명령어를 저장했습니다."
+    assert saved.reply == "/공지 명령어를 저장했습니다."
 
-    public_reply = await bot.handle("!공지", room="공개방", sender="일반")
+    public_reply = await bot.handle("/공지", room="공개방", sender="일반")
     assert public_reply.reply == "공개방 공지입니다"
 
-    control_list = await bot.handle("!명령어목록", room="관리자방", sender="오너")
-    assert "!공지" in control_list.reply
-    assert "!명령어추가 공지 내용" in control_list.reply
+    control_list = await bot.handle("/명령어목록", room="관리자방", sender="오너")
+    assert "/공지" in control_list.reply
+    assert "/명령어추가 공지 내용" in control_list.reply

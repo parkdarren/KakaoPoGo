@@ -77,7 +77,7 @@ Check:
 
 ```bash
 curl http://127.0.0.1:8000/health
-curl "http://127.0.0.1:8000/command?text=!dex%20Pikachu"
+curl "http://127.0.0.1:8000/command?text=/dex%20Pikachu"
 ```
 
 From your PC or phone browser:

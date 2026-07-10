@@ -117,7 +117,7 @@ public class MainActivity extends Activity {
             try {
                 String reply = BotHttpClient.command(
                         BotConfig.serverUrl(this),
-                        "!dex Pikachu",
+                        "/dex Pikachu",
                         "AndroidTest",
                         "Bridge"
                 );

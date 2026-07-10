@@ -25,7 +25,7 @@ class CommandRequest(BaseModel):
 async def root() -> dict[str, str]:
     return {
         "name": "KakaoPoGo Bot",
-        "try": "POST /command with {'text': '!도감 피카츄'}",
+        "try": "POST /command with {'text': '/도감 피카츄'}",
     }
 
 
@@ -35,7 +35,7 @@ async def health() -> dict[str, str]:
 
 
 def _is_silent_message(text: str) -> bool:
-    return not text.strip().startswith("!")
+    return not text.strip().startswith("/")
 
 
 def _silent_response() -> dict[str, Any]:

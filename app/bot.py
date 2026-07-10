@@ -16,30 +16,30 @@ from app.pogo_api import (
 
 OWNER_SETUP_CODE = os.getenv("OWNER_SETUP_CODE", "change-me")
 PUBLIC_COMMANDS = [
-    "!도감 피카츄",
-    "!스킬 피카츄",
-    "!100 자시안 검왕",
-    "!약점 기라티나 오리진",
-    "!cp 피카츄 25 15/15/15",
-    "!권한확인",
-    "!관리자요청",
-    "!도움말",
+    "/도감 피카츄",
+    "/스킬 피카츄",
+    "/100 자시안 검왕",
+    "/약점 기라티나 오리진",
+    "/cp 피카츄 25 15/15/15",
+    "/권한확인",
+    "/관리자요청",
+    "/도움말",
 ]
 ADMIN_COMMANDS = [
-    "!대상방설정 공개방이름",
-    "!대상방확인",
-    "!명령어등록 공지 내용",
-    "!명령어추가 공지 내용",
-    "!명령어수정 공지 새내용",
-    "!명령어삭제 공지",
+    "/대상방설정 공개방이름",
+    "/대상방확인",
+    "/명령어등록 공지 내용",
+    "/명령어추가 공지 내용",
+    "/명령어수정 공지 새내용",
+    "/명령어삭제 공지",
 ]
 OWNER_COMMANDS = [
-    "!오너등록 코드",
-    "!관리자요청목록",
-    "!관리자승인 번호",
-    "!관리자거절 번호",
-    "!관리자삭제 번호",
-    "!관리자목록",
+    "/오너등록 코드",
+    "/관리자요청목록",
+    "/관리자승인 번호",
+    "/관리자거절 번호",
+    "/관리자삭제 번호",
+    "/관리자목록",
 ]
 
 
@@ -53,48 +53,52 @@ def parse_command(text: str) -> tuple[str, str] | None:
     if not parts:
         return None
 
-    command = parts[0].lower()
+    raw_command = parts[0].strip()
+    if not raw_command.startswith("/") or len(raw_command) == 1:
+        return None
+
+    command = raw_command[1:].lower()
     query = parts[1].strip() if len(parts) > 1 else ""
-    if command in ("!도감", "!dex"):
+    if command in ("도감", "dex"):
         return "dex", query
-    if command in ("!100", "!백"):
+    if command in ("100", "백"):
         return "perfect", query
-    if command in ("!약점", "!weak"):
+    if command in ("약점", "weak"):
         return "weakness", query
-    if command in ("!스킬", "!기술", "!skill", "!moves"):
+    if command in ("스킬", "기술", "skill", "moves"):
         return "moves", query
-    if command in ("!cp",):
+    if command in ("cp",):
         return "cp", query
-    if command in ("!오너등록", "!owner"):
+    if command in ("오너등록", "owner"):
         return "owner_setup", query
-    if command in ("!관리자요청",):
+    if command in ("관리자요청",):
         return "admin_request", query
-    if command in ("!권한확인", "!role"):
+    if command in ("권한확인", "role"):
         return "role_check", query
-    if command in ("!관리자요청목록",):
+    if command in ("관리자요청목록",):
         return "admin_request_list", query
-    if command in ("!관리자승인",):
+    if command in ("관리자승인",):
         return "admin_approve", query
-    if command in ("!관리자거절",):
+    if command in ("관리자거절",):
         return "admin_reject", query
-    if command in ("!관리자목록",):
+    if command in ("관리자목록",):
         return "admin_list", query
-    if command in ("!관리자삭제",):
+    if command in ("관리자삭제",):
         return "admin_remove", query
-    if command in ("!대상방설정",):
+    if command in ("대상방설정",):
         return "target_set", query
-    if command in ("!대상방확인",):
+    if command in ("대상방확인",):
         return "target_show", query
-    if command in ("!명령어등록", "!명령어추가", "!명령어수정"):
+    if command in ("명령어등록", "명령어추가", "명령어수정"):
         return "custom_upsert", query
-    if command in ("!명령어삭제",):
+    if command in ("명령어삭제",):
         return "custom_delete", query
-    if command in ("!명령어목록",):
+    if command in ("명령어목록",):
         return "custom_list", query
-    if command in ("!help", "!도움말"):
+    if command in ("help", "도움말"):
         return "help", ""
-    if command.startswith("!") and len(command) > 1:
-        return "custom_run", command[1:]
+    if len(command) > 0:
+        return "custom_run", command
     return None
 
 
@@ -136,7 +140,7 @@ class PokemonGoBot:
     ) -> BotResponse:
         parsed = parse_command(text)
         if parsed is None:
-            return BotResponse("알 수 없는 명령어입니다. !도움말 을 입력해 주세요.")
+            return BotResponse("알 수 없는 명령어입니다. /도움말 을 입력해 주세요.")
 
         command, query = parsed
         user = self._chat_user(room, sender, user_key)
@@ -190,11 +194,11 @@ class PokemonGoBot:
             )
             if custom:
                 return BotResponse(custom.response)
-            return BotResponse("알 수 없는 명령어입니다. !도움말 을 입력해 주세요.")
+            return BotResponse("알 수 없는 명령어입니다. /도움말 을 입력해 주세요.")
 
         if command == "dex":
             if not query:
-                return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: !도감 피카츄")
+                return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: /도감 피카츄")
             try:
                 entry = await self.pogo_client.get_dex_entry(query)
             except LookupError:
@@ -203,7 +207,7 @@ class PokemonGoBot:
 
         if command == "perfect":
             if not query:
-                return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: !100 자시안")
+                return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: /100 자시안")
             try:
                 entry = await self.pogo_client.get_dex_entry(query)
             except LookupError:
@@ -212,7 +216,7 @@ class PokemonGoBot:
 
         if command == "weakness":
             if not query:
-                return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: !약점 기라티나 오리진")
+                return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: /약점 기라티나 오리진")
             try:
                 entry = await self.pogo_client.get_dex_entry(query)
             except LookupError:
@@ -221,7 +225,7 @@ class PokemonGoBot:
 
         if command == "moves":
             if not query:
-                return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: !스킬 피카츄")
+                return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: /스킬 피카츄")
             try:
                 entry = await self.pogo_client.get_dex_entry(query)
             except LookupError:
@@ -232,7 +236,7 @@ class PokemonGoBot:
             try:
                 pokemon_query, level, ivs = parse_cp_query(query)
             except ValueError:
-                return BotResponse("형식은 이렇게 입력해 주세요. 예: !cp 피카츄 25 15/15/15")
+                return BotResponse("형식은 이렇게 입력해 주세요. 예: /cp 피카츄 25 15/15/15")
             try:
                 entry = await self.pogo_client.get_dex_entry(pokemon_query)
             except LookupError:
@@ -257,7 +261,7 @@ class PokemonGoBot:
     def _handle_target_set(self, user: ChatUser, target_room: str) -> str:
         clean_target = target_room.strip()
         if not clean_target:
-            return "대상 공개방 이름을 입력해 주세요. 예: !대상방설정 포켓몬고 레이드방"
+            return "대상 공개방 이름을 입력해 주세요. 예: /대상방설정 포켓몬고 레이드방"
 
         if not self.admin_store.is_admin_or_owner(user):
             return "owner 또는 admin만 대상방을 설정할 수 있습니다."
@@ -315,8 +319,8 @@ class PokemonGoBot:
         lines = ["관리자 요청 목록"]
         for request in requests:
             lines.append(f"{request.id}. {request.sender}")
-        lines.append("승인: !관리자승인 번호")
-        lines.append("거절: !관리자거절 번호")
+        lines.append("승인: /관리자승인 번호")
+        lines.append("거절: /관리자거절 번호")
         return "\n".join(lines)
 
     def _handle_admin_approve(self, user: ChatUser, query: str) -> str:
@@ -325,7 +329,7 @@ class PokemonGoBot:
 
         request_id = self._parse_request_id(query)
         if request_id is None:
-            return "승인할 요청번호를 입력해 주세요. 예: !관리자승인 3"
+            return "승인할 요청번호를 입력해 주세요. 예: /관리자승인 3"
 
         request = self.admin_store.get_pending_request(user.room, request_id)
         if not request:
@@ -340,7 +344,7 @@ class PokemonGoBot:
 
         request_id = self._parse_request_id(query)
         if request_id is None:
-            return "거절할 요청번호를 입력해 주세요. 예: !관리자거절 3"
+            return "거절할 요청번호를 입력해 주세요. 예: /관리자거절 3"
 
         request = self.admin_store.reject_request(user.room, request_id)
         if not request:
@@ -366,7 +370,7 @@ class PokemonGoBot:
 
         admin_index = self._parse_request_id(query)
         if admin_index is None:
-            return "삭제할 관리자 번호를 입력해 주세요. 예: !관리자삭제 2"
+            return "삭제할 관리자 번호를 입력해 주세요. 예: /관리자삭제 2"
 
         admins = self.admin_store.list_admin_records(user.room)
         if admin_index < 1 or admin_index > len(admins):
@@ -387,7 +391,7 @@ class PokemonGoBot:
 
         parsed = self._parse_custom_upsert(query)
         if parsed is None:
-            return "형식은 이렇게 입력해 주세요. 예: !명령어등록 공지 오늘 레이드 8시"
+            return "형식은 이렇게 입력해 주세요. 예: /명령어등록 공지 오늘 레이드 8시"
 
         command, response = parsed
         self.admin_store.upsert_custom_command(
@@ -396,7 +400,7 @@ class PokemonGoBot:
             response,
             user.sender,
         )
-        return f"!{command} 명령어를 저장했습니다."
+        return f"/{command} 명령어를 저장했습니다."
 
     def _handle_custom_delete(self, user: ChatUser, target_room: str, query: str) -> str:
         if not self.admin_store.is_admin_or_owner(user):
@@ -404,47 +408,54 @@ class PokemonGoBot:
 
         command = self._normalize_custom_command(query)
         if not command:
-            return "삭제할 명령어 이름을 입력해 주세요. 예: !명령어삭제 공지"
+            return "삭제할 명령어 이름을 입력해 주세요. 예: /명령어삭제 공지"
 
         deleted = self.admin_store.delete_custom_command(target_room, command)
         if not deleted:
-            return f"!{command} 명령어를 찾지 못했습니다."
-        return f"!{command} 명령어를 삭제했습니다."
+            return f"/{command} 명령어를 찾지 못했습니다."
+        return f"/{command} 명령어를 삭제했습니다."
 
     def _handle_custom_list(self, user: ChatUser, target_room: str) -> str:
         return self._handle_command_list(user, target_room)
 
     def _handle_public_help(self, user: ChatUser) -> str:
         lines = [
-            "[ 포켓몬GO 도감 봇 사용법 ]",
-            "명령어는 앞에 ! 를 붙여서 사용해 주세요.",
+            "【 포켓몬GO 봇 도움말 】",
+            "━━━━━━━━━━━━━━━━",
+            "1. /도감 포켓몬이름",
+            "└ 포켓몬 타입, 약점, 100% CP를 확인합니다.",
+            "└ 예시 : /도감 디아루가, /도감 화이트큐레무",
             "",
-            "1. 포켓몬 도감 보기",
-            "!도감 포켓몬이름",
-            "예: !도감 피카츄 / !도감 디아루가 / !도감 자시안 검왕",
+            "2. /스킬 포켓몬이름",
+            "└ 포켓몬GO 기술을 한글명으로 확인합니다.",
+            "└ 예시 : /스킬 피카츄, /스킬 블랙큐레무",
             "",
-            "2. 100% 개체값 CP 보기",
-            "!100 포켓몬이름",
-            "예: !100 디아루가 / !100 자시안 검왕",
+            "3. /100 포켓몬이름",
+            "└ 100% 개체값 CP만 빠르게 확인합니다.",
+            "└ 예시 : /100 자시안 검왕",
             "",
-            "3. 약점 보기",
-            "!약점 포켓몬이름",
-            "예: !약점 디아루가 / !약점 기라티나 오리진",
+            "4. /약점 포켓몬이름",
+            "└ 타입, 약점, 저항을 확인합니다.",
+            "└ 예시 : /약점 기라티나 오리진",
             "",
-            "4. 기술 보기",
-            "!스킬 포켓몬이름",
-            "예: !스킬 피카츄 / !스킬 디아루가",
+            "5. /cp 포켓몬이름 레벨 공격/방어/체력",
+            "└ 원하는 레벨과 IV의 CP를 계산합니다.",
+            "└ 예시 : /cp 피카츄 40 15/15/15",
             "",
-            "5. 원하는 레벨/개체값 CP 계산",
-            "!cp 포켓몬이름 레벨 공격/방어/체력",
-            "예: !cp 피카츄 40 15/15/15",
+            "6. /권한확인",
+            "└ 현재 방에서 내 권한을 확인합니다.",
+            "",
+            "7. /관리자요청",
+            "└ 관리자 권한을 owner에게 요청합니다.",
         ]
 
         custom_commands = self.admin_store.list_custom_commands(user.room)
         if custom_commands:
             lines.append("")
-            lines.append("방에서 추가된 명령어")
-            lines.extend(f"!{command}" for command in custom_commands)
+            lines.append("【 방 명령어 】")
+            lines.append("━━━━━━━━━━━━━━━━")
+            for index, command in enumerate(custom_commands, start=1):
+                lines.append(f"{index}. /{command}")
 
         return "\n".join(lines)
 
@@ -456,7 +467,7 @@ class PokemonGoBot:
         if custom_commands:
             lines.append("")
             lines.append("방 명령어")
-            lines.extend(f"!{command}" for command in custom_commands)
+            lines.extend(f"/{command}" for command in custom_commands)
 
         if role in {"owner", "admin"}:
             lines.append("")

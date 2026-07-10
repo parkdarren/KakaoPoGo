@@ -3,7 +3,7 @@
 Pokemon GO information bot for KakaoTalk open-chat communities.
 
 KakaoPoGo provides a FastAPI backend that receives chat-style commands and
-returns concise Korean replies for `!`-prefixed Pokemon GO lookups, perfect-IV CP tables,
+returns concise Korean replies for `/`-prefixed Pokemon GO lookups, perfect-IV CP tables,
 weaknesses, forms, aliases, and room-specific custom commands.
 
 ## Highlights
@@ -15,28 +15,28 @@ weaknesses, forms, aliases, and room-specific custom commands.
 - Custom CP calculator by level and IV spread.
 - Short aliases such as `디아`, `alg`, and `루가` for frequent room searches.
 - Role-based owner/admin management for room custom commands.
-- Public `!도움말` output that excludes owner/admin-only commands.
-- Room-specific custom commands with `!명령어등록`, `!명령어수정`, and `!명령어삭제`.
+- Public `/도움말` output that excludes owner/admin-only commands.
+- Room-specific custom commands with `/명령어등록`, `/명령어수정`, and `/명령어삭제`.
 - KakaoTalk bridge scripts for MessengerBotR-style notification bot runners.
 - Optional Android notification bridge project.
 
 ## Command Examples
 
 ```text
-!도감 디아루가
-!도감 디아
-!도감 alg
-!도감 자시안 검왕
-!도감 화이트큐레무
-!스킬 피카츄
-!스킬 블랙큐레무
-!100 기라티나 오리진
-!약점 뮤츠
-!cp 피카츄 40 15/15/15
-!도움말
+/도감 디아루가
+/도감 디아
+/도감 alg
+/도감 자시안 검왕
+/도감 화이트큐레무
+/스킬 피카츄
+/스킬 블랙큐레무
+/100 기라티나 오리진
+/약점 뮤츠
+/cp 피카츄 40 15/15/15
+/도움말
 ```
 
-Commands intentionally use `!` only. Slash-prefixed messages are ignored.
+Commands intentionally use `/` only. Exclamation-prefixed messages are ignored.
 
 Example dex reply:
 
@@ -120,7 +120,7 @@ Test a command:
 
 ```powershell
 Invoke-RestMethod `
-  -Uri "http://127.0.0.1:8000/command?text=!dex%20Dialga&room=local&sender=test"
+  -Uri "http://127.0.0.1:8000/command?text=/dex%20Dialga&room=local&sender=test"
 ```
 
 ## KakaoTalk Bridge

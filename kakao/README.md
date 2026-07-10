@@ -1,7 +1,7 @@
 # KakaoTalk Runner Setup
 
 This folder contains KakaoTalk bridge scripts for Android notification-based bot
-runners. The runner listens to KakaoTalk notifications, sends supported `!` commands
+runners. The runner listens to KakaoTalk notifications, sends supported `/` commands
 to the KakaoPoGo backend, and replies with the backend response.
 
 ## Scripts
@@ -38,28 +38,28 @@ Slash-prefixed messages are ignored by design.
 ## Public Test Commands
 
 ```text
-!도움말
-!도감 디아루가
-!도감 디아
-!도감 alg
-!도감 화이트큐레무
-!스킬 피카츄
-!스킬 블랙큐레무
-!100 자시안 검왕
-!약점 기라티나 오리진
-!cp 피카츄 40 15/15/15
+/도움말
+/도감 디아루가
+/도감 디아
+/도감 alg
+/도감 화이트큐레무
+/스킬 피카츄
+/스킬 블랙큐레무
+/100 자시안 검왕
+/약점 기라티나 오리진
+/cp 피카츄 40 15/15/15
 ```
 
 ## Admin Notes
 
 Owner/admin commands are handled by the backend and are intentionally hidden from
-the public `!도움말` response. Use a separate management room if you do not want
+the public `/도움말` response. Use a separate management room if you do not want
 regular users to see management messages typed into KakaoTalk.
 
 Custom room commands can be saved with:
 
 ```text
-!명령어등록 공지 오늘 레이드 8시
+/명령어등록 공지 오늘 레이드 8시
 ```
 
 ## Caveat

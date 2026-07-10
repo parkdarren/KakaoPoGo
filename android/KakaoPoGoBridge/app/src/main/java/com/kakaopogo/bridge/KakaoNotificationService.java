@@ -166,7 +166,7 @@ public class KakaoNotificationService extends NotificationListenerService {
     }
 
     private boolean isCommand(String text) {
-        return text.startsWith("!") || text.startsWith("/");
+        return text.startsWith("/");
     }
 
     private String firstLine(String text) {

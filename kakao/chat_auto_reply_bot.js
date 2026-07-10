@@ -1,9 +1,9 @@
 const SERVER_URL = "http://YOUR_SERVER_IP:8000/command";
-const SCRIPT_VERSION = "kakaopogo-2026-07-10-silent-v2";
+const SCRIPT_VERSION = "kakaopogo-2026-07-10-slash-v1";
 
 function response(room, msg, sender, isGroupChat, replier, imageDB, packageName) {
   const text = String(msg || "").trim();
-  if (text === "!스크립트버전" || text === "!봇버전") {
+  if (text === "/스크립트버전" || text === "/봇버전") {
     replier.reply("KakaoPoGo script " + SCRIPT_VERSION);
     return;
   }
@@ -43,5 +43,5 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
 }
 
 function isSupportedCommand(text) {
-  return text.indexOf("!") === 0;
+  return text.indexOf("/") === 0;
 }
