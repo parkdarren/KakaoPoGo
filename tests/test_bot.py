@@ -22,6 +22,9 @@ def test_parse_new_commands() -> None:
     assert parse_command("/100 자시안 검왕") == ("perfect", "자시안 검왕")
     assert parse_command("/약점 기라티나 오리진") == ("weakness", "기라티나 오리진")
     assert parse_command("/카운터 뮤츠") == ("counter", "뮤츠")
+    assert parse_command("/리그 마릴리") == ("league", "마릴리")
+    assert parse_command("/오늘의포켓몬") == ("daily", "")
+    assert parse_command("/출첵") == ("daily", "")
     assert parse_command("/스킬 피카츄") == ("moves", "피카츄")
     assert parse_command("/기술 디아루가") == ("moves", "디아루가")
     assert parse_command("/cp 피카츄 25 15/15/15") == ("cp", "피카츄 25 15/15/15")
@@ -87,6 +90,41 @@ async def test_dex_reports_friendly_message_when_data_unavailable(tmp_path) -> N
     reply = await bot.handle("/도감 피카츄", room="레이드방", sender="일반")
 
     assert reply.reply == DATA_UNAVAILABLE_MESSAGE
+
+
+@pytest.mark.anyio
+async def test_daily_pokemon_checks_in_once_per_day(tmp_path) -> None:
+    from datetime import date
+
+    from app.admin_store import ChatUser
+    from app.bot import DAILY_CHECK_IN_POINTS
+
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    user = ChatUser(room="레이드방", sender="지우", user_key="hash:ash")
+
+    first = bot._handle_daily(user, today=date(2026, 7, 10))
+    assert "오늘의 파트너:" in first
+    assert "오늘의 운세:" in first
+    assert f"출석 완료! +{DAILY_CHECK_IN_POINTS}P (누적 1일)" in first
+    assert f"보유 포인트: {DAILY_CHECK_IN_POINTS}P" in first
+
+    same_day = bot._handle_daily(user, today=date(2026, 7, 10))
+    assert "오늘은 이미 출석했어요. (누적 1일)" in same_day
+    assert f"보유 포인트: {DAILY_CHECK_IN_POINTS}P" in same_day
+    # 같은 날에는 파트너와 운세도 동일하다.
+    assert first.split("\n")[1] == same_day.split("\n")[1]
+
+    next_day = bot._handle_daily(user, today=date(2026, 7, 11))
+    assert "출석 완료!" in next_day
+    assert "(누적 2일)" in next_day
+    assert f"보유 포인트: {DAILY_CHECK_IN_POINTS * 2}P" in next_day
+
+    other_user = ChatUser(room="레이드방", sender="웅이", user_key="hash:brock")
+    other = bot._handle_daily(other_user, today=date(2026, 7, 11))
+    assert "(누적 1일)" in other
 
 
 @pytest.mark.anyio

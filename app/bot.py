@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from datetime import date
@@ -12,6 +13,7 @@ from app.pogo_api import (
     PogoDataUnavailableError,
     format_custom_cp_reply,
     format_dex_reply,
+    format_league_reply,
     format_moves_reply,
     format_perfect_cp_reply,
     format_weakness_reply,
@@ -21,6 +23,21 @@ from app.pogo_api import (
 DATA_UNAVAILABLE_MESSAGE = (
     "포켓몬 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
 )
+DAILY_CHECK_IN_POINTS = 5
+DAILY_FORTUNES = [
+    "오늘은 100% 개체값이 뜰 운세!",
+    "색이 다른 포켓몬이 스쳐 지나갈 예감이에요.",
+    "10km 알에서 좋은 소식이 있겠어요.",
+    "레이드 막차가 기다리고 있어요. 놓치지 마세요.",
+    "오늘 던진 커브볼은 전부 엑설런트!",
+    "포켓스탑에서 귀한 아이템이 나올 것 같아요.",
+    "트레이드 운이 좋은 날, 행운의 친구가 될지도!",
+    "GBL 연승의 기운이 느껴져요.",
+    "산책 나가기 좋은 날이에요. 버디가 사탕을 물어올 거예요.",
+    "야생에서 뜻밖의 만남이 기다려요.",
+    "오늘은 별의모래가 쏟아지는 날!",
+    "로켓단을 만나면 이기는 날이에요.",
+]
 # 날짜에 따라 하나씩 돌아가며 /도움말 첫 줄에 붙는다.
 HELP_GREETINGS = [
     "오늘도 즐거운 포켓몬고 하세요!",
@@ -67,6 +84,16 @@ BUILTIN_HELP_ENTRIES = [
         "/cp 포켓몬이름 레벨 공격/방어/체력",
         "원하는 레벨과 IV의 CP를 계산합니다.\n"
         "예시 : /cp 피카츄 40 15/15/15",
+    ),
+    (
+        "/리그 포켓몬이름",
+        "슈퍼/하이퍼리그 랭크1 개체값을 계산합니다.\n"
+        "예시 : /리그 마릴리, /리그 기라티나 어나더",
+    ),
+    (
+        "/오늘의포켓몬",
+        "오늘의 파트너 포켓몬과 운세를 뽑고 출석체크가 됩니다.\n"
+        f"하루 1회, 출석마다 {DAILY_CHECK_IN_POINTS}포인트 적립!",
     ),
 ]
 ADMIN_COMMANDS = [
@@ -115,6 +142,10 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "moves", query
     if command in ("cp",):
         return "cp", query
+    if command in ("리그", "league", "pvp"):
+        return "league", query
+    if command in ("오늘의포켓몬", "출첵", "출석"):
+        return "daily", query
     if command in ("오너등록", "owner"):
         return "owner_setup", query
     if command in ("관리자요청",):
@@ -197,6 +228,9 @@ class PokemonGoBot:
         target_user = self._target_user(user)
         if command == "help":
             return BotResponse(self._handle_public_help(target_user))
+
+        if command == "daily":
+            return BotResponse(self._handle_daily(user))
 
         if command == "owner_setup":
             return BotResponse(self._handle_owner_setup(user, query))
@@ -298,6 +332,19 @@ class PokemonGoBot:
                 return BotResponse(DATA_UNAVAILABLE_MESSAGE)
             return BotResponse(format_counter_reply(entry))
 
+        if command == "league":
+            if not query:
+                return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: /리그 마릴리")
+            try:
+                entry = await self.pogo_client.get_dex_entry(query)
+            except MegaUnavailableError:
+                return BotResponse(f"'{query}' 메가진화는 아직 포켓몬GO에 없습니다.")
+            except LookupError:
+                return BotResponse(f"'{query}' 포켓몬을 찾지 못했습니다.")
+            except PogoDataUnavailableError:
+                return BotResponse(DATA_UNAVAILABLE_MESSAGE)
+            return BotResponse(format_league_reply(entry))
+
         if command == "moves":
             if not query:
                 return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: /스킬 피카츄")
@@ -390,6 +437,43 @@ class PokemonGoBot:
 
         request_id = self.admin_store.add_admin_request(user)
         return f"관리자 요청을 받았습니다. owner 승인을 기다려 주세요. 요청번호: {request_id}"
+
+    def _handle_daily(self, user: ChatUser, today: date | None = None) -> str:
+        today = today or date.today()
+        date_key = today.isoformat()
+        partner = self._daily_pick(
+            f"{user.user_key}:{date_key}:partner",
+            self._partner_names(),
+        )
+        fortune = self._daily_pick(
+            f"{user.user_key}:{date_key}:fortune",
+            DAILY_FORTUNES,
+        )
+        total_days, points, checked_in = self.admin_store.check_in(
+            user,
+            date_key,
+            DAILY_CHECK_IN_POINTS,
+        )
+
+        lines = [
+            f"[오늘의 포켓몬] {user.sender} 님",
+            f"오늘의 파트너: {partner}",
+            f"오늘의 운세: {fortune}",
+        ]
+        if checked_in:
+            lines.append(f"출석 완료! +{DAILY_CHECK_IN_POINTS}P (누적 {total_days}일)")
+        else:
+            lines.append(f"오늘은 이미 출석했어요. (누적 {total_days}일)")
+        lines.append(f"보유 포인트: {points}P")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _daily_pick(seed: str, options: list[str]) -> str:
+        digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+        return options[int(digest, 16) % len(options)]
+
+    def _partner_names(self) -> list[str]:
+        return sorted(self.pogo_client.name_resolver.display_names.values())
 
     def _handle_role_check(self, user: ChatUser) -> str:
         role = self.admin_store.get_effective_role(user) or "없음"
@@ -595,6 +679,12 @@ class PokemonGoBot:
             "skill",
             "moves",
             "cp",
+            "리그",
+            "league",
+            "pvp",
+            "오늘의포켓몬",
+            "출첵",
+            "출석",
             "오너등록",
             "owner",
             "관리자요청",

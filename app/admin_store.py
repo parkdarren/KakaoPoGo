@@ -96,6 +96,16 @@ class AdminStore:
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (control_room, user_key)
                 );
+
+                CREATE TABLE IF NOT EXISTS attendance (
+                    room TEXT NOT NULL,
+                    user_key TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    last_check_in TEXT,
+                    total_days INTEGER NOT NULL DEFAULT 0,
+                    points INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (room, user_key)
+                );
                 """
             )
             self._ensure_column(conn, "custom_commands", "display_command", "TEXT")
@@ -206,6 +216,42 @@ class AdminStore:
             )
         except sqlite3.IntegrityError:
             pass
+
+    def check_in(
+        self,
+        user: ChatUser,
+        today: str,
+        points_per_day: int,
+    ) -> tuple[int, int, bool]:
+        """출석을 기록하고 (누적일수, 보유포인트, 오늘 새로 출석했는지)를 돌려준다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT last_check_in, total_days, points
+                FROM attendance
+                WHERE room = ? AND user_key = ?
+                """,
+                (user.room, user.user_key),
+            ).fetchone()
+
+            if row and row["last_check_in"] == today:
+                return row["total_days"], row["points"], False
+
+            total_days = (row["total_days"] if row else 0) + 1
+            points = (row["points"] if row else 0) + points_per_day
+            conn.execute(
+                """
+                INSERT INTO attendance (room, user_key, display_name, last_check_in, total_days, points)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(room, user_key)
+                DO UPDATE SET display_name = excluded.display_name,
+                              last_check_in = excluded.last_check_in,
+                              total_days = excluded.total_days,
+                              points = excluded.points
+                """,
+                (user.room, user.user_key, user.sender, today, total_days, points),
+            )
+            return total_days, points, True
 
     def is_owner(self, user: ChatUser) -> bool:
         return self.get_effective_role(user) == "owner"

@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from app.cp import FALLBACK_CPM, calculate_cp, perfect_cp_table
+from app.cp import FALLBACK_CPM, calculate_cp, perfect_cp_table, rank1_iv
 from app.localization import ko_form, ko_move, ko_type, ko_weather
 from app.name_map import NameResolver, ResolvedPokemon
 
@@ -429,6 +429,34 @@ def format_weakness_reply(entry: PokemonDexEntry) -> str:
         f"약점: {', '.join(entry.weaknesses) or '없음'}\n"
         f"저항: {', '.join(entry.resistances) or '없음'}"
     )
+
+
+LEAGUE_CAPS = [("슈퍼리그", 1500), ("하이퍼리그", 2500)]
+
+
+def format_league_reply(entry: PokemonDexEntry) -> str:
+    form_name = ko_form(entry.form) if not _is_default_form(entry.form) else ""
+    form = f" ({form_name})" if form_name else ""
+    lines = [f"[{entry.display_name}] #{entry.id:03d}{form} 리그 랭크1"]
+    for league, cap in LEAGUE_CAPS:
+        rank = rank1_iv(
+            entry.base_attack,
+            entry.base_defense,
+            entry.base_stamina,
+            cap,
+        )
+        lines.append(
+            f"{league}: {rank.attack_iv}/{rank.defense_iv}/{rank.stamina_iv}"
+            f" Lv{rank.level:g} CP {rank.cp}"
+        )
+    master_cp = calculate_cp(
+        entry.base_attack,
+        entry.base_defense,
+        entry.base_stamina,
+        50,
+    )
+    lines.append(f"마스터리그: 15/15/15 Lv50 CP {master_cp}")
+    return "\n".join(lines)
 
 
 def format_custom_cp_reply(

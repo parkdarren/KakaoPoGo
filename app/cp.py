@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from math import floor, sqrt
 
 
@@ -132,6 +133,82 @@ def calculate_cp(
         / 10
     )
     return max(10, floor(raw_cp))
+
+
+@dataclass(frozen=True)
+class LeagueRank:
+    attack_iv: int
+    defense_iv: int
+    stamina_iv: int
+    level: float
+    cp: int
+    stat_product: float
+
+
+def rank1_iv(
+    base_attack: int,
+    base_defense: int,
+    base_stamina: int,
+    cp_cap: int,
+    cpm_by_level: dict[float, float] | None = None,
+    max_level: float = 51.0,
+) -> LeagueRank:
+    """CP 제한 리그에서 스탯곱이 최대가 되는 개체값(랭크1)을 찾는다."""
+    cpm = cpm_by_level or FALLBACK_CPM
+    levels = sorted(level for level in cpm if level <= max_level)
+    best: LeagueRank | None = None
+
+    for attack_iv in range(16):
+        for defense_iv in range(16):
+            for stamina_iv in range(16):
+                low, high = 0, len(levels) - 1
+                if (
+                    calculate_cp(
+                        base_attack, base_defense, base_stamina,
+                        levels[0], attack_iv, defense_iv, stamina_iv, cpm,
+                    )
+                    > cp_cap
+                ):
+                    continue
+                # CP는 레벨에 대해 단조 증가라 이진 탐색으로 제한 내
+                # 최고 레벨을 찾을 수 있다.
+                while low < high:
+                    mid = (low + high + 1) // 2
+                    cp_at_mid = calculate_cp(
+                        base_attack, base_defense, base_stamina,
+                        levels[mid], attack_iv, defense_iv, stamina_iv, cpm,
+                    )
+                    if cp_at_mid <= cp_cap:
+                        low = mid
+                    else:
+                        high = mid - 1
+
+                level = levels[low]
+                multiplier = cpm[level]
+                stat_product = (
+                    (base_attack + attack_iv)
+                    * multiplier
+                    * (base_defense + defense_iv)
+                    * multiplier
+                    * floor((base_stamina + stamina_iv) * multiplier)
+                )
+                # 동률이면 나중(더 높은) IV를 택해 상한 미달 포켓몬이
+                # 15/15/15로 표시되게 한다.
+                if best is None or stat_product >= best.stat_product:
+                    best = LeagueRank(
+                        attack_iv=attack_iv,
+                        defense_iv=defense_iv,
+                        stamina_iv=stamina_iv,
+                        level=level,
+                        cp=calculate_cp(
+                            base_attack, base_defense, base_stamina,
+                            level, attack_iv, defense_iv, stamina_iv, cpm,
+                        ),
+                        stat_product=stat_product,
+                    )
+
+    assert best is not None  # 최소 CP는 10이라 항상 후보가 있다.
+    return best
 
 
 def perfect_cp_table(
