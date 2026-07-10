@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,6 +56,8 @@ class PokemonDexEntry:
     weather_boosts: list[str]
     # (한글 타입명, 배율) 목록. 배율이 큰 약점(2중 약점)이 먼저 온다.
     weakness_details: list[tuple[str, float]] = field(default_factory=list)
+    recommended_fast_move: str | None = None
+    recommended_charged_move: str | None = None
 
 
 class PogoApiClient:
@@ -92,6 +95,10 @@ class PogoApiClient:
         weather_boosts = await self._fetch_json("weather_boosts.json")
 
         pokemon_types = types.get("type", [])
+        recommended_fast_move, recommended_charged_move = await self._recommend_moves(
+            moves,
+            pokemon_types,
+        )
         weakness_details, resistances = self._calculate_matchups(
             pokemon_types,
             type_effectiveness,
@@ -125,6 +132,8 @@ class PogoApiClient:
             resistances=resistances,
             weather_boosts=self._weather_for_types(pokemon_types, weather_boosts),
             weakness_details=weakness_details,
+            recommended_fast_move=recommended_fast_move,
+            recommended_charged_move=recommended_charged_move,
         )
 
     async def _get_mega_entry(self, resolved: ResolvedPokemon) -> PokemonDexEntry:
@@ -177,6 +186,10 @@ class PogoApiClient:
         weather_boosts = await self._fetch_json("weather_boosts.json")
 
         pokemon_types = mega.get("type", [])
+        recommended_fast_move, recommended_charged_move = await self._recommend_moves(
+            moves,
+            pokemon_types,
+        )
         weakness_details, resistances = self._calculate_matchups(
             pokemon_types,
             type_effectiveness,
@@ -209,6 +222,8 @@ class PogoApiClient:
             resistances=resistances,
             weather_boosts=self._weather_for_types(pokemon_types, weather_boosts),
             weakness_details=weakness_details,
+            recommended_fast_move=recommended_fast_move,
+            recommended_charged_move=recommended_charged_move,
         )
 
     @staticmethod
@@ -346,6 +361,43 @@ class PogoApiClient:
                 matched.append(ko_weather(weather))
         return matched
 
+    async def _recommend_moves(
+        self,
+        moves: dict[str, Any],
+        pokemon_types: list[str],
+    ) -> tuple[str | None, str | None]:
+        fast_names = _unique_moves(
+            moves.get("fast_moves", []) + moves.get("elite_fast_moves", [])
+        )
+        charged_names = _unique_moves(
+            moves.get("charged_moves", []) + moves.get("elite_charged_moves", [])
+        )
+        if not fast_names or not charged_names:
+            return None, None
+
+        try:
+            fast_stats = _move_index(await self._fetch_json("fast_moves.json"))
+            charged_stats = _move_index(await self._fetch_json("charged_moves.json"))
+        except Exception:
+            return None, None
+
+        best_pair: tuple[str, str] | None = None
+        best_score = -1.0
+        for fast_name in fast_names:
+            fast_move = fast_stats.get(fast_name)
+            if not fast_move:
+                continue
+            for charged_name in charged_names:
+                charged_move = charged_stats.get(charged_name)
+                if not charged_move:
+                    continue
+                score = _raid_cycle_score(fast_move, charged_move, pokemon_types)
+                if score > best_score:
+                    best_pair = (fast_name, charged_name)
+                    best_score = score
+
+        return best_pair if best_pair else (None, None)
+
 
 def format_dex_reply(entry: PokemonDexEntry) -> str:
     number = f"No.{entry.id:03d}"
@@ -432,11 +484,77 @@ def format_moves_reply(entry: PokemonDexEntry) -> str:
             lines.append(f"노말: {_format_move_list(entry.elite_fast_moves)}")
         if entry.elite_charged_moves:
             lines.append(f"스페셜: {_format_move_list(entry.elite_charged_moves)}")
+    if entry.recommended_fast_move and entry.recommended_charged_move:
+        lines.append("")
+        lines.append("[ 추천스킬 ]")
+        fast_move = _format_recommended_move(entry.recommended_fast_move, entry)
+        charged_move = _format_recommended_move(entry.recommended_charged_move, entry)
+        lines.append(f"레이드: {fast_move} + {charged_move}")
     return "\n".join(lines)
 
 
 def _format_move_list(moves: list[str]) -> str:
     return " / ".join(ko_move(move) for move in moves)
+
+
+def _format_recommended_move(move: str, entry: PokemonDexEntry) -> str:
+    label = ko_move(move)
+    elite_moves = set(entry.elite_fast_moves + entry.elite_charged_moves)
+    if move in elite_moves:
+        label = f"{label}(대기머)"
+    return label
+
+
+def _unique_moves(moves: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for move in moves:
+        if move and move not in seen:
+            seen.add(move)
+            unique.append(move)
+    return unique
+
+
+def _move_index(records: Any) -> dict[str, dict[str, Any]]:
+    return {
+        str(item.get("name")): item
+        for item in records
+        if isinstance(item, dict) and item.get("name")
+    }
+
+
+def _raid_cycle_score(
+    fast_move: dict[str, Any],
+    charged_move: dict[str, Any],
+    pokemon_types: list[str],
+) -> float:
+    fast_energy = max(int(fast_move.get("energy_delta") or 0), 1)
+    charged_cost = abs(int(charged_move.get("energy_delta") or 0)) or 50
+    fast_count = max(math.ceil(charged_cost / fast_energy), 1)
+
+    fast_duration = max(float(fast_move.get("duration") or 0) / 1000, 0.5)
+    charged_duration = max(float(charged_move.get("duration") or 0) / 1000, 0.5)
+    total_duration = fast_count * fast_duration + charged_duration
+    if total_duration <= 0:
+        return 0
+
+    fast_power = float(fast_move.get("power") or 0)
+    charged_power = float(charged_move.get("power") or 0)
+    fast_damage = fast_count * fast_power * _stab_multiplier(fast_move, pokemon_types)
+    charged_damage = charged_power * _stab_multiplier(charged_move, pokemon_types)
+    score = (fast_damage + charged_damage) / total_duration
+
+    fast_type = fast_move.get("type")
+    charged_type = charged_move.get("type")
+    if fast_type == charged_type and fast_type in pokemon_types:
+        score *= 1.15
+    elif charged_type in pokemon_types:
+        score *= 1.05
+    return score
+
+
+def _stab_multiplier(move: dict[str, Any], pokemon_types: list[str]) -> float:
+    return 1.2 if move.get("type") in pokemon_types else 1.0
 
 
 def format_weakness_reply(entry: PokemonDexEntry) -> str:

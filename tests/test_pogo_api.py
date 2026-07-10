@@ -279,6 +279,87 @@ def test_moves_reply_uses_korean_move_names() -> None:
     )
 
 
+def test_moves_reply_shows_recommended_moves() -> None:
+    entry = PokemonDexEntry(
+        id=25,
+        name="Pikachu",
+        display_name="피카츄",
+        form=None,
+        types=["Electric"],
+        base_attack=112,
+        base_defense=96,
+        base_stamina=111,
+        fast_moves=["Thunder Shock", "Quick Attack"],
+        charged_moves=["Discharge", "Thunderbolt"],
+        elite_fast_moves=[],
+        elite_charged_moves=["Surf"],
+        perfect_cps={},
+        weaknesses=["땅"],
+        resistances=[],
+        weather_boosts=["비"],
+        recommended_fast_move="Thunder Shock",
+        recommended_charged_move="Surf",
+    )
+
+    assert format_moves_reply(entry).endswith(
+        "\n\n[ 추천스킬 ]\n"
+        "레이드: 전기쇼크 + 파도타기(대기머)"
+    )
+
+
+@pytest.mark.anyio
+async def test_recommend_moves_uses_raid_cycle_score(tmp_path, monkeypatch) -> None:
+    client = PogoApiClient(cache_dir=tmp_path)
+
+    async def fake_fetch(endpoint: str):
+        return {
+            "fast_moves.json": [
+                {
+                    "name": "Thunder Shock",
+                    "power": 5,
+                    "duration": 600,
+                    "energy_delta": 8,
+                    "type": "Electric",
+                },
+                {
+                    "name": "Quick Attack",
+                    "power": 5,
+                    "duration": 1000,
+                    "energy_delta": 7,
+                    "type": "Normal",
+                },
+            ],
+            "charged_moves.json": [
+                {
+                    "name": "Thunderbolt",
+                    "power": 80,
+                    "duration": 2500,
+                    "energy_delta": -50,
+                    "type": "Electric",
+                },
+                {
+                    "name": "Wild Charge",
+                    "power": 90,
+                    "duration": 2600,
+                    "energy_delta": -50,
+                    "type": "Electric",
+                },
+            ],
+        }[endpoint]
+
+    monkeypatch.setattr(client, "_fetch_json", fake_fetch)
+
+    recommended = await client._recommend_moves(
+        {
+            "fast_moves": ["Thunder Shock", "Quick Attack"],
+            "charged_moves": ["Thunderbolt", "Wild Charge"],
+        },
+        ["Electric"],
+    )
+
+    assert recommended == ("Thunder Shock", "Wild Charge")
+
+
 def test_dex_reply_translates_elite_moves_to_korean() -> None:
     entry = PokemonDexEntry(
         id=646,
