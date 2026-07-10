@@ -151,7 +151,7 @@ class PokemonGoBot:
             return BotResponse(self._handle_admin_request(user))
 
         if command == "role_check":
-            return BotResponse(self._handle_role_check(target_user))
+            return BotResponse(self._handle_role_check(user))
 
         if command == "admin_request_list":
             return BotResponse(self._handle_admin_request_list(target_user))
@@ -175,13 +175,13 @@ class PokemonGoBot:
             return BotResponse(self._handle_target_show(user))
 
         if command == "custom_upsert":
-            return BotResponse(self._handle_custom_upsert(target_user, query))
+            return BotResponse(self._handle_custom_upsert(user, target_user.room, query))
 
         if command == "custom_delete":
-            return BotResponse(self._handle_custom_delete(target_user, query))
+            return BotResponse(self._handle_custom_delete(user, target_user.room, query))
 
         if command == "custom_list":
-            return BotResponse(self._handle_custom_list(target_user))
+            return BotResponse(self._handle_custom_list(user, target_user.room))
 
         if command == "custom_run":
             custom = self.admin_store.get_custom_command(
@@ -259,13 +259,8 @@ class PokemonGoBot:
         if not clean_target:
             return "대상 공개방 이름을 입력해 주세요. 예: !대상방설정 포켓몬고 레이드방"
 
-        target_user = ChatUser(
-            room=clean_target,
-            sender=user.sender,
-            user_key=user.user_key,
-        )
-        if not self.admin_store.is_admin_or_owner(target_user):
-            return "그 방의 owner 또는 admin으로 등록된 사람만 대상방을 설정할 수 있습니다."
+        if not self.admin_store.is_admin_or_owner(user):
+            return "owner 또는 admin만 대상방을 설정할 수 있습니다."
 
         self.admin_store.set_control_target(
             user.room,
@@ -287,9 +282,6 @@ class PokemonGoBot:
             if self.admin_store.is_owner(user):
                 self.admin_store.replace_owner(user)
                 return "이미 이 방의 owner로 등록되어 있습니다."
-            if self.admin_store.has_only_legacy_owner(user.room):
-                self.admin_store.replace_owner(user)
-                return "이 방의 owner 인증 정보를 현재 프로필 기준으로 안정화했습니다."
             return "이 방에는 이미 owner가 등록되어 있습니다."
 
         self.admin_store.add_owner(user)
@@ -389,7 +381,7 @@ class PokemonGoBot:
             return "해당 관리자 번호를 찾지 못했습니다."
         return f"{display_name} 님의 admin 권한을 삭제했습니다."
 
-    def _handle_custom_upsert(self, user: ChatUser, query: str) -> str:
+    def _handle_custom_upsert(self, user: ChatUser, target_room: str, query: str) -> str:
         if not self.admin_store.is_admin_or_owner(user):
             return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
@@ -399,14 +391,14 @@ class PokemonGoBot:
 
         command, response = parsed
         self.admin_store.upsert_custom_command(
-            user.room,
+            target_room,
             command,
             response,
             user.sender,
         )
         return f"!{command} 명령어를 저장했습니다."
 
-    def _handle_custom_delete(self, user: ChatUser, query: str) -> str:
+    def _handle_custom_delete(self, user: ChatUser, target_room: str, query: str) -> str:
         if not self.admin_store.is_admin_or_owner(user):
             return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
@@ -414,13 +406,13 @@ class PokemonGoBot:
         if not command:
             return "삭제할 명령어 이름을 입력해 주세요. 예: !명령어삭제 공지"
 
-        deleted = self.admin_store.delete_custom_command(user.room, command)
+        deleted = self.admin_store.delete_custom_command(target_room, command)
         if not deleted:
             return f"!{command} 명령어를 찾지 못했습니다."
         return f"!{command} 명령어를 삭제했습니다."
 
-    def _handle_custom_list(self, user: ChatUser) -> str:
-        return self._handle_command_list(user)
+    def _handle_custom_list(self, user: ChatUser, target_room: str) -> str:
+        return self._handle_command_list(user, target_room)
 
     def _handle_public_help(self, user: ChatUser) -> str:
         lines = [
@@ -456,11 +448,11 @@ class PokemonGoBot:
 
         return "\n".join(lines)
 
-    def _handle_command_list(self, user: ChatUser) -> str:
+    def _handle_command_list(self, user: ChatUser, custom_room: str | None = None) -> str:
         role = self.admin_store.get_role(user)
         lines = ["사용 가능한 명령어", *PUBLIC_COMMANDS]
 
-        custom_commands = self.admin_store.list_custom_commands(user.room)
+        custom_commands = self.admin_store.list_custom_commands(custom_room or user.room)
         if custom_commands:
             lines.append("")
             lines.append("방 명령어")

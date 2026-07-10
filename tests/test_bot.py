@@ -199,12 +199,12 @@ async def test_owner_setup_does_not_replace_existing_owner(tmp_path) -> None:
 
 
 @pytest.mark.anyio
-async def test_owner_setup_can_upgrade_legacy_owner_to_stable_key(tmp_path) -> None:
+async def test_owner_setup_does_not_upgrade_different_legacy_owner(tmp_path) -> None:
     store = AdminStore(tmp_path / "test.sqlite3")
     bot = PokemonGoBot(admin_store=store)
 
     await bot.handle("!오너등록 change-me", room="레이드방", sender="예전오너")
-    upgraded = await bot.handle(
+    blocked = await bot.handle(
         "!오너등록 change-me",
         room="레이드방",
         sender="현재오너",
@@ -212,16 +212,21 @@ async def test_owner_setup_can_upgrade_legacy_owner_to_stable_key(tmp_path) -> N
     )
 
     admins = store.list_admin_records("레이드방")
-    assert upgraded.reply == "이 방의 owner 인증 정보를 현재 프로필 기준으로 안정화했습니다."
-    assert admins == [("현재오너", "owner", "hash:stable-owner")]
+    assert blocked.reply == "이 방에는 이미 owner가 등록되어 있습니다."
+    assert admins == [("예전오너", "owner", "sender:예전오너")]
 
 
 @pytest.mark.anyio
-async def test_global_owner_can_manage_room_when_profile_matches(tmp_path) -> None:
+async def test_hash_owner_is_recognized_globally(tmp_path) -> None:
     store = AdminStore(tmp_path / "test.sqlite3")
     bot = PokemonGoBot(admin_store=store)
 
-    await bot.handle("!오너등록 change-me", room="개인방", sender="오너")
+    await bot.handle(
+        "!오너등록 change-me",
+        room="개인방",
+        sender="오너",
+        user_key="hash:owner",
+    )
     saved = await bot.handle(
         "!명령어등록 공지 전역 오너 테스트",
         room="공개방",
@@ -245,14 +250,14 @@ async def test_global_owner_can_manage_room_when_profile_matches(tmp_path) -> No
 async def test_admin_can_manage_target_room_from_control_room(tmp_path) -> None:
     bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
 
-    await bot.handle("!오너등록 change-me", room="공개방", sender="오너")
+    await bot.handle("!오너등록 change-me", room="관리자방", sender="오너")
 
     denied = await bot.handle(
         "!대상방설정 공개방",
         room="관리자방",
         sender="일반",
     )
-    assert denied.reply == "그 방의 owner 또는 admin으로 등록된 사람만 대상방을 설정할 수 있습니다."
+    assert denied.reply == "owner 또는 admin만 대상방을 설정할 수 있습니다."
 
     linked = await bot.handle(
         "!대상방설정 공개방",

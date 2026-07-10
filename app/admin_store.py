@@ -103,18 +103,6 @@ class AdminStore:
             ).fetchone()
         return row is not None
 
-    def has_only_legacy_owner(self, room: str) -> bool:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT user_key
-                FROM room_admins
-                WHERE room = ? AND role = 'owner'
-                """,
-                (room,),
-            ).fetchall()
-        return bool(rows) and all(row["user_key"].startswith("sender:") for row in rows)
-
     def get_role(self, user: ChatUser) -> str | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -150,44 +138,19 @@ class AdminStore:
         return None
 
     def is_global_owner(self, user: ChatUser) -> bool:
+        if user.user_key.startswith("sender:"):
+            return False
         with self._connect() as conn:
-            if not user.user_key.startswith("sender:"):
-                row = conn.execute(
-                    """
-                    SELECT 1
-                    FROM room_admins
-                    WHERE user_key = ? AND role = 'owner'
-                    LIMIT 1
-                    """,
-                    (user.user_key,),
-                ).fetchone()
-                if row:
-                    return True
-
             row = conn.execute(
                 """
                 SELECT 1
                 FROM room_admins
-                WHERE display_name = ? AND role = 'owner'
+                WHERE user_key = ? AND role = 'owner'
                 LIMIT 1
                 """,
-                (user.sender,),
+                (user.user_key,),
             ).fetchone()
-            if not row:
-                return False
-
-            if not user.user_key.startswith("sender:"):
-                conn.execute(
-                    """
-                    UPDATE room_admins
-                    SET user_key = ?, display_name = ?
-                    WHERE display_name = ?
-                      AND role = 'owner'
-                      AND user_key LIKE 'sender:%'
-                    """,
-                    (user.user_key, user.sender, user.sender),
-                )
-            return True
+        return row is not None
 
     @staticmethod
     def _promote_admin_key(
