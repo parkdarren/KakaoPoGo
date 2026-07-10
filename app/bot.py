@@ -14,7 +14,9 @@ from app.pogo_api import (
 )
 
 
-OWNER_SETUP_CODE = os.getenv("OWNER_SETUP_CODE", "change-me")
+OWNER_SETUP_CODE = os.getenv("OWNER_SETUP_CODE", "")
+# 저장소에 공개된 예시 값이므로 실제 등록 코드로 인정하지 않는다.
+INSECURE_SETUP_CODES = {"", "change-me"}
 BUILTIN_HELP_ENTRIES = [
     (
         "/도감 포켓몬이름",
@@ -144,9 +146,13 @@ class PokemonGoBot:
         self,
         pogo_client: PogoApiClient | None = None,
         admin_store: AdminStore | None = None,
+        owner_setup_code: str | None = None,
     ) -> None:
         self.pogo_client = pogo_client or PogoApiClient()
         self.admin_store = admin_store or AdminStore()
+        self.owner_setup_code = (
+            OWNER_SETUP_CODE if owner_setup_code is None else owner_setup_code
+        )
 
     async def handle(
         self,
@@ -302,7 +308,12 @@ class PokemonGoBot:
         return f"현재 대상방: {target_room}"
 
     def _handle_owner_setup(self, user: ChatUser, code: str) -> str:
-        if code.strip() != OWNER_SETUP_CODE:
+        if self.owner_setup_code in INSECURE_SETUP_CODES:
+            return (
+                "오너 등록이 잠겨 있습니다. 서버 관리자가 OWNER_SETUP_CODE를 "
+                "기본값이 아닌 비밀 값으로 설정해야 합니다."
+            )
+        if code.strip() != self.owner_setup_code:
             return "오너 등록 코드가 맞지 않습니다."
         if self.admin_store.has_owner(user.room):
             if self.admin_store.is_owner(user):

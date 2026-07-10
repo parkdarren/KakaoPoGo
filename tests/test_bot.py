@@ -12,7 +12,7 @@ def test_parse_new_commands() -> None:
     assert parse_command("/스킬 피카츄") == ("moves", "피카츄")
     assert parse_command("/기술 디아루가") == ("moves", "디아루가")
     assert parse_command("/cp 피카츄 25 15/15/15") == ("cp", "피카츄 25 15/15/15")
-    assert parse_command("/오너등록 change-me") == ("owner_setup", "change-me")
+    assert parse_command("/오너등록 test-setup-code") == ("owner_setup", "test-setup-code")
     assert parse_command("/관리자요청") == ("admin_request", "")
     assert parse_command("/권한확인") == ("role_check", "")
     assert parse_command("/관리자승인 1") == ("admin_approve", "1")
@@ -61,10 +61,13 @@ def test_parse_cp_query_rejects_bad_input(query: str) -> None:
 
 @pytest.mark.anyio
 async def test_owner_approves_admin_request(tmp_path) -> None:
-    bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
 
     owner = await bot.handle(
-        "/오너등록 change-me",
+        "/오너등록 test-setup-code",
         room="레이드방",
         sender="오너",
     )
@@ -119,7 +122,10 @@ async def test_owner_approves_admin_request(tmp_path) -> None:
 
 @pytest.mark.anyio
 async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
-    bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
 
     denied = await bot.handle(
         "/명령어추가 공지 오늘 레이드 8시",
@@ -128,7 +134,7 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
     )
     assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
-    await bot.handle("/오너등록 change-me", room="레이드방", sender="오너")
+    await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="오너")
     saved = await bot.handle(
         "/명령어등록 공지 오늘 레이드 8시",
         room="레이드방",
@@ -179,9 +185,12 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
 
 @pytest.mark.anyio
 async def test_owner_role_survives_user_key_upgrade(tmp_path) -> None:
-    bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
 
-    await bot.handle("/오너등록 change-me", room="레이드방", sender="오너")
+    await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="오너")
     saved = await bot.handle(
         "/명령어추가 공지 오늘 레이드 8시",
         room="레이드방",
@@ -193,17 +202,33 @@ async def test_owner_role_survives_user_key_upgrade(tmp_path) -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("insecure_code", ["", "change-me"])
+async def test_owner_setup_is_locked_with_default_code(tmp_path, insecure_code) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store, owner_setup_code=insecure_code)
+
+    blocked = await bot.handle(
+        f"/오너등록 {insecure_code}".strip(),
+        room="레이드방",
+        sender="선점시도",
+    )
+
+    assert "오너 등록이 잠겨 있습니다" in blocked.reply
+    assert store.list_admin_records("레이드방") == []
+
+
+@pytest.mark.anyio
 async def test_owner_setup_does_not_replace_existing_owner(tmp_path) -> None:
     store = AdminStore(tmp_path / "test.sqlite3")
-    bot = PokemonGoBot(admin_store=store)
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
 
     await bot.handle(
-        "/오너등록 change-me",
+        "/오너등록 test-setup-code",
         room="레이드방",
         sender="이전오너",
         user_key="hash:previous-owner",
     )
-    blocked = await bot.handle("/오너등록 change-me", room="레이드방", sender="현재오너")
+    blocked = await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="현재오너")
 
     admins = store.list_admin_records("레이드방")
     assert blocked.reply == "이 방에는 이미 owner가 등록되어 있습니다."
@@ -213,11 +238,11 @@ async def test_owner_setup_does_not_replace_existing_owner(tmp_path) -> None:
 @pytest.mark.anyio
 async def test_owner_setup_does_not_upgrade_different_legacy_owner(tmp_path) -> None:
     store = AdminStore(tmp_path / "test.sqlite3")
-    bot = PokemonGoBot(admin_store=store)
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
 
-    await bot.handle("/오너등록 change-me", room="레이드방", sender="예전오너")
+    await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="예전오너")
     blocked = await bot.handle(
-        "/오너등록 change-me",
+        "/오너등록 test-setup-code",
         room="레이드방",
         sender="현재오너",
         user_key="hash:stable-owner",
@@ -231,10 +256,10 @@ async def test_owner_setup_does_not_upgrade_different_legacy_owner(tmp_path) -> 
 @pytest.mark.anyio
 async def test_hash_owner_is_recognized_globally(tmp_path) -> None:
     store = AdminStore(tmp_path / "test.sqlite3")
-    bot = PokemonGoBot(admin_store=store)
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
 
     await bot.handle(
-        "/오너등록 change-me",
+        "/오너등록 test-setup-code",
         room="개인방",
         sender="오너",
         user_key="hash:owner",
@@ -260,9 +285,12 @@ async def test_hash_owner_is_recognized_globally(tmp_path) -> None:
 
 @pytest.mark.anyio
 async def test_admin_can_manage_target_room_from_control_room(tmp_path) -> None:
-    bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
 
-    await bot.handle("/오너등록 change-me", room="관리자방", sender="오너")
+    await bot.handle("/오너등록 test-setup-code", room="관리자방", sender="오너")
 
     denied = await bot.handle(
         "/대상방설정 공개방",
@@ -295,9 +323,12 @@ async def test_admin_can_manage_target_room_from_control_room(tmp_path) -> None:
 
 @pytest.mark.anyio
 async def test_control_room_target_survives_user_key_upgrade(tmp_path) -> None:
-    bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
 
-    await bot.handle("/오너등록 change-me", room="관리자방", sender="오너")
+    await bot.handle("/오너등록 test-setup-code", room="관리자방", sender="오너")
     await bot.handle("/대상방설정 공개방", room="관리자방", sender="오너")
     await bot.handle(
         "/명령어추가 공지 공개방 공지입니다",
