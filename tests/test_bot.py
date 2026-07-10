@@ -105,7 +105,7 @@ def test_kakao_skill_returns_simple_text_response() -> None:
     assert "/도감 포켓몬이름" in outputs[0]["simpleText"]["text"]
     assert "/관리자요청" not in outputs[0]["simpleText"]["text"]
     assert "/명령어등록" not in outputs[0]["simpleText"]["text"]
-    assert body["template"]["quickReplies"][0]["messageText"] == "/도움말"
+    assert "quickReplies" not in body["template"]
 
 
 def test_kakao_skill_uses_action_params_when_utterance_is_missing() -> None:

@@ -118,12 +118,6 @@ def _kakao_simple_text_response(reply: str) -> dict[str, Any]:
         "version": "2.0",
         "template": {
             "outputs": [{"simpleText": {"text": chunk}} for chunk in chunks],
-            "quickReplies": [
-                {"label": "도움말", "action": "message", "messageText": "/도움말"},
-                {"label": "도감", "action": "message", "messageText": "/도감 피카츄"},
-                {"label": "스킬", "action": "message", "messageText": "/스킬 피카츄"},
-                {"label": "100 CP", "action": "message", "messageText": "/100 디아루가"},
-            ],
         },
     }
 
