@@ -1,6 +1,8 @@
 const bot = BotManager.getCurrentBot();
 const SERVER_URL = "http://YOUR_SERVER_IP:8000/command";
-const SCRIPT_VERSION = "kakaopogo-2026-07-10-slash-v1";
+// 서버의 BRIDGE_KEY 환경변수와 같은 값으로 맞춰야 합니다.
+const BRIDGE_KEY = "YOUR_BRIDGE_KEY";
+const SCRIPT_VERSION = "kakaopogo-2026-07-10-bridge-key-v2";
 
 function onMessage(msg) {
   const text = String(msg.content || "").trim();
@@ -29,6 +31,7 @@ function onMessage(msg) {
       encodeURIComponent(userKey);
 
     const body = org.jsoup.Jsoup.connect(url)
+      .header("X-Bridge-Key", BRIDGE_KEY)
       .ignoreContentType(true)
       .ignoreHttpErrors(true)
       .timeout(20000)

@@ -1,9 +1,10 @@
 import pytest
+from fastapi.testclient import TestClient
 
 from app.admin_store import AdminStore
 from app.bot import parse_command, parse_cp_query
 from app.bot import PokemonGoBot
-from app.main import _is_silent_message, command_get
+from app.main import _is_silent_message, app, command_get
 
 
 def test_parse_new_commands() -> None:
@@ -34,6 +35,33 @@ async def test_exclamation_command_returns_silent_response() -> None:
     response = await command_get("!도감 피카츄", room="레이드방", sender="일반")
 
     assert response == {"reply": "", "silent": True}
+
+
+def test_command_requires_bridge_key_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("BRIDGE_KEY", "bridge-secret")
+    client = TestClient(app)
+
+    denied = client.get("/command", params={"text": "!x"})
+    assert denied.status_code == 403
+
+    wrong = client.get(
+        "/command", params={"text": "!x"}, headers={"X-Bridge-Key": "nope"}
+    )
+    assert wrong.status_code == 403
+
+    allowed = client.get(
+        "/command", params={"text": "!x"}, headers={"X-Bridge-Key": "bridge-secret"}
+    )
+    assert allowed.status_code == 200
+    assert allowed.json() == {"reply": "", "silent": True}
+
+
+def test_command_stays_open_without_bridge_key(monkeypatch) -> None:
+    monkeypatch.delenv("BRIDGE_KEY", raising=False)
+    client = TestClient(app)
+
+    response = client.get("/command", params={"text": "!x"})
+    assert response.status_code == 200
 
 
 def test_parse_cp_query_with_form_name() -> None:
@@ -281,6 +309,29 @@ async def test_hash_owner_is_recognized_globally(tmp_path) -> None:
     assert "권한: owner" in role.reply
     assert "식별 방식" not in role.reply
     assert "프로필:" not in role.reply
+
+
+@pytest.mark.anyio
+async def test_nickname_impersonation_of_hash_owner_is_denied(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
+
+    await bot.handle(
+        "/오너등록 test-setup-code",
+        room="레이드방",
+        sender="오너",
+        user_key="hash:real-owner",
+    )
+
+    denied = await bot.handle(
+        "/명령어등록 공지 사칭 시도",
+        room="레이드방",
+        sender="오너",
+        user_key="hash:attacker",
+    )
+
+    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+    assert store.list_admin_records("레이드방") == [("오너", "owner", "hash:real-owner")]
 
 
 @pytest.mark.anyio

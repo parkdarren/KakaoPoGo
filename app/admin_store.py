@@ -146,6 +146,9 @@ class AdminStore:
             if row:
                 return row["role"]
 
+            # 닉네임 매칭은 hash 키가 없던 시절의 레코드를 새 키로 옮겨주는
+            # 이전 경로로만 쓴다. 이미 hash 키가 붙은 레코드까지 닉네임으로
+            # 인정하면 닉네임만 똑같이 바꾼 사칭을 막을 수 없다.
             row = conn.execute(
                 """
                 SELECT user_key, role
@@ -154,7 +157,7 @@ class AdminStore:
                 """,
                 (user.room, user.sender),
             ).fetchone()
-            if row:
+            if row and row["user_key"].startswith("sender:"):
                 self._promote_admin_key(conn, user, row["user_key"])
                 return row["role"]
         return None

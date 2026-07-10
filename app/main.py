@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from app.bot import PokemonGoBot
 from app.pogo_api import PogoApiClient, format_dex_reply
+
+
+def _verify_bridge_key(x_bridge_key: str | None = Header(default=None)) -> None:
+    # BRIDGE_KEY가 설정된 서버에서는 같은 키를 아는 브리지만 명령을 보낼 수 있다.
+    # 로컬 개발처럼 키가 없으면 인증을 건너뛴다.
+    bridge_key = os.getenv("BRIDGE_KEY", "").strip()
+    if not bridge_key:
+        return
+    if x_bridge_key != bridge_key:
+        raise HTTPException(status_code=403, detail="invalid bridge key")
 
 
 app = FastAPI(title="KakaoPoGo Bot", version="0.1.0")
@@ -46,7 +57,7 @@ def _reply_response(reply: str) -> dict[str, Any]:
     return {"reply": reply, "silent": False}
 
 
-@app.post("/command")
+@app.post("/command", dependencies=[Depends(_verify_bridge_key)])
 async def command(request: CommandRequest) -> dict[str, Any]:
     if _is_silent_message(request.text):
         return _silent_response()
@@ -60,7 +71,7 @@ async def command(request: CommandRequest) -> dict[str, Any]:
     return _reply_response(response.reply)
 
 
-@app.get("/command")
+@app.get("/command", dependencies=[Depends(_verify_bridge_key)])
 async def command_get(
     text: str,
     room: str = "local",
@@ -74,7 +85,7 @@ async def command_get(
     return _reply_response(response.reply)
 
 
-@app.get("/dex/{name}")
+@app.get("/dex/{name}", dependencies=[Depends(_verify_bridge_key)])
 async def dex(name: str) -> dict[str, object]:
     entry = await pogo.get_dex_entry(name)
     return {

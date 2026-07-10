@@ -4,6 +4,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/kakaopogo}"
 APP_USER="${APP_USER:-ubuntu}"
 OWNER_SETUP_CODE="${OWNER_SETUP_CODE:-change-me}"
+BRIDGE_KEY="${BRIDGE_KEY:-}"
 
 if [[ ! -d "$APP_DIR" ]]; then
   echo "App directory not found: $APP_DIR"
@@ -25,6 +26,7 @@ sudo sed -i "s/^User=.*/User=${APP_USER}/" /etc/systemd/system/kakaopogo.service
 sudo sed -i "s/^Group=.*/Group=${APP_USER}/" /etc/systemd/system/kakaopogo.service
 sudo sed -i "s|^WorkingDirectory=.*|WorkingDirectory=${APP_DIR}|" /etc/systemd/system/kakaopogo.service
 sudo sed -i "s|^Environment=OWNER_SETUP_CODE=.*|Environment=OWNER_SETUP_CODE=${OWNER_SETUP_CODE}|" /etc/systemd/system/kakaopogo.service
+sudo sed -i "s|^Environment=BRIDGE_KEY=.*|Environment=BRIDGE_KEY=${BRIDGE_KEY}|" /etc/systemd/system/kakaopogo.service
 sudo sed -i "s|^ExecStart=.*|ExecStart=${APP_DIR}/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000|" /etc/systemd/system/kakaopogo.service
 
 sudo systemctl daemon-reload

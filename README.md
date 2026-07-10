@@ -135,7 +135,12 @@ Before pasting a script into the runner, set:
 
 ```javascript
 const SERVER_URL = "http://YOUR_SERVER_IP:8000/command";
+const BRIDGE_KEY = "YOUR_BRIDGE_KEY";
 ```
+
+`BRIDGE_KEY` must match the server's `BRIDGE_KEY` environment variable. When
+the server has a key configured, requests without the matching `X-Bridge-Key`
+header are rejected, so random internet traffic cannot drive the bot.
 
 For Android runner setup notes, see `kakao/README.md`.
 
@@ -147,8 +152,9 @@ An Ubuntu VPS is enough for early operation. The recommended deployment path is:
 2. Open inbound TCP `8000`.
 3. Upload the project.
 4. Set `OWNER_SETUP_CODE` to a private value.
-5. Run the setup script in `deploy/vps_setup.sh`.
-6. Point the KakaoTalk bridge script to the VPS command endpoint.
+5. Set `BRIDGE_KEY` to a private value shared with the bridge script.
+6. Run the setup script in `deploy/vps_setup.sh`.
+7. Point the KakaoTalk bridge script to the VPS command endpoint.
 
 Detailed notes are in `deploy/IWINV_VPS.md`.
 

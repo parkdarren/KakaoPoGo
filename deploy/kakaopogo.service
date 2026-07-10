@@ -9,6 +9,7 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/opt/kakaopogo
 Environment=OWNER_SETUP_CODE=change-me
+Environment=BRIDGE_KEY=
 ExecStart=/opt/kakaopogo/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
