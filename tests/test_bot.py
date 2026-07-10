@@ -143,6 +143,8 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
     assert "/명령어목록" not in listed.reply
     assert "/명령어추가" not in listed.reply
     assert "/관리자승인" not in listed.reply
+    assert "/권한확인" not in listed.reply
+    assert "/관리자요청" not in listed.reply
 
     owner_listed = await bot.handle("/명령어목록", room="레이드방", sender="오너")
     assert "/공지" in owner_listed.reply
@@ -157,6 +159,8 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
     assert "/명령어추가" not in owner_help.reply
     assert "/관리자승인" not in owner_help.reply
     assert "/오너등록" not in owner_help.reply
+    assert "/권한확인" not in owner_help.reply
+    assert "/관리자요청" not in owner_help.reply
 
     deleted = await bot.handle("/명령어삭제 공지", room="레이드방", sender="오너")
     assert deleted.reply == "/공지 명령어를 삭제했습니다."
@@ -279,3 +283,28 @@ async def test_admin_can_manage_target_room_from_control_room(tmp_path) -> None:
     control_list = await bot.handle("/명령어목록", room="관리자방", sender="오너")
     assert "/공지" in control_list.reply
     assert "/명령어추가 공지 내용" in control_list.reply
+
+
+@pytest.mark.anyio
+async def test_control_room_target_survives_user_key_upgrade(tmp_path) -> None:
+    bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
+
+    await bot.handle("/오너등록 change-me", room="관리자방", sender="오너")
+    await bot.handle("/대상방설정 공개방", room="관리자방", sender="오너")
+    await bot.handle(
+        "/명령어추가 공지 공개방 공지입니다",
+        room="관리자방",
+        sender="오너",
+        user_key="hash:owner",
+    )
+
+    help_reply = await bot.handle(
+        "/도움말",
+        room="관리자방",
+        sender="오너",
+        user_key="hash:owner",
+    )
+    public_reply = await bot.handle("/공지", room="공개방", sender="일반")
+
+    assert "/공지" in help_reply.reply
+    assert public_reply.reply == "공개방 공지입니다"

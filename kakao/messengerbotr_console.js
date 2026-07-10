@@ -1,5 +1,5 @@
 const bot = BotManager.getCurrentBot();
-const SERVER_URL = "http://YOUR_SERVER_IP:8000/command";
+const SERVER_URL = "http://49.247.139.6:8000/command";
 const SCRIPT_VERSION = "kakaopogo-2026-07-10-slash-v1";
 
 function onMessage(msg) {

@@ -21,8 +21,6 @@ PUBLIC_COMMANDS = [
     "/100 자시안 검왕",
     "/약점 기라티나 오리진",
     "/cp 피카츄 25 15/15/15",
-    "/권한확인",
-    "/관리자요청",
     "/도움말",
 ]
 ADMIN_COMMANDS = [
@@ -254,6 +252,11 @@ class PokemonGoBot:
 
     def _target_user(self, user: ChatUser) -> ChatUser:
         target_room = self.admin_store.get_control_target(user.room, user.user_key)
+        if not target_room and not user.user_key.startswith("sender:"):
+            legacy_key = f"sender:{user.sender}"
+            target_room = self.admin_store.get_control_target(user.room, legacy_key)
+            if target_room:
+                self.admin_store.set_control_target(user.room, user.user_key, target_room)
         if not target_room:
             return user
         return ChatUser(room=target_room, sender=user.sender, user_key=user.user_key)
@@ -441,12 +444,6 @@ class PokemonGoBot:
             "5. /cp 포켓몬이름 레벨 공격/방어/체력",
             "└ 원하는 레벨과 IV의 CP를 계산합니다.",
             "└ 예시 : /cp 피카츄 40 15/15/15",
-            "",
-            "6. /권한확인",
-            "└ 현재 방에서 내 권한을 확인합니다.",
-            "",
-            "7. /관리자요청",
-            "└ 관리자 권한을 owner에게 요청합니다.",
         ]
 
         custom_commands = self.admin_store.list_custom_commands(user.room)
