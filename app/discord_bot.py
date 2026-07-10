@@ -194,6 +194,11 @@ async def league(interaction: discord.Interaction, pokemon: str) -> None:
     await _run_core_command(interaction, f"/리그 {pokemon}")
 
 
+@tree.command(name="포켓몬고이벤트", description="진행 중인 이벤트와 7일간의 예정 이벤트를 봅니다.")
+async def pokemon_go_events(interaction: discord.Interaction) -> None:
+    await _run_core_command(interaction, "/포켓몬고이벤트")
+
+
 @tree.command(name="오늘의포켓몬", description="오늘의 파트너 포켓몬과 출석을 확인합니다.")
 async def daily(interaction: discord.Interaction) -> None:
     await _run_core_command(interaction, "/오늘의포켓몬")

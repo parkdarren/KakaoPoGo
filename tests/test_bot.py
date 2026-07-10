@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from app.admin_store import AdminStore
 from app.bot import DATA_UNAVAILABLE_MESSAGE, parse_command, parse_cp_query
 from app.bot import PokemonGoBot
+from app.events import EventDataUnavailableError
 from app.main import _is_silent_message, _split_kakao_text, app, command_get
 from app.pogo_api import MegaUnavailableError, PogoDataUnavailableError
 
@@ -18,11 +19,24 @@ class MegaUnavailablePogoClient:
         raise MegaUnavailableError(query)
 
 
+class FakeEventClient:
+    async def format_schedule(self, days: int = 7) -> str:
+        return f"event schedule for {days} days"
+
+
+class FailingEventClient:
+    async def format_schedule(self, days: int = 7) -> str:
+        raise EventDataUnavailableError("boom")
+
+
 def test_parse_new_commands() -> None:
     assert parse_command("/100 자시안 검왕") == ("perfect", "자시안 검왕")
     assert parse_command("/약점 기라티나 오리진") == ("weakness", "기라티나 오리진")
     assert parse_command("/카운터 뮤츠") == ("counter", "뮤츠")
     assert parse_command("/리그 마릴리") == ("league", "마릴리")
+    assert parse_command("/포켓몬고이벤트") == ("events", "")
+    assert parse_command("/이벤트") == ("events", "")
+    assert parse_command("/일정") == ("events", "")
     assert parse_command("/오늘의포켓몬") == ("daily", "")
     assert parse_command("/출첵") == ("daily", "")
     assert parse_command("/ㅊㅊ") == ("daily", "")
@@ -103,6 +117,7 @@ def test_kakao_skill_returns_simple_text_response() -> None:
     assert 1 <= len(outputs) <= 3
     assert "【 포켓몬GO 정보 명령어 】" in outputs[0]["simpleText"]["text"]
     assert "/도감 포켓몬이름" in outputs[0]["simpleText"]["text"]
+    assert "/포켓몬고이벤트" in outputs[0]["simpleText"]["text"]
     assert "/관리자요청" not in outputs[0]["simpleText"]["text"]
     assert "/명령어등록" not in outputs[0]["simpleText"]["text"]
     assert "quickReplies" not in body["template"]
@@ -247,6 +262,32 @@ async def test_dex_reports_friendly_message_when_data_unavailable(tmp_path) -> N
     reply = await bot.handle("/도감 피카츄", room="레이드방", sender="일반")
 
     assert reply.reply == DATA_UNAVAILABLE_MESSAGE
+
+
+@pytest.mark.anyio
+async def test_event_command_uses_event_client(tmp_path) -> None:
+    bot = PokemonGoBot(
+        event_client=FakeEventClient(),
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+
+    reply = await bot.handle("/포켓몬고이벤트", room="레이드방", sender="일반")
+
+    assert reply.reply == "event schedule for 7 days"
+
+
+@pytest.mark.anyio
+async def test_event_command_reports_data_unavailable(tmp_path) -> None:
+    bot = PokemonGoBot(
+        event_client=FailingEventClient(),
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+
+    reply = await bot.handle("/이벤트", room="레이드방", sender="일반")
+
+    assert reply.reply == "포켓몬GO 이벤트 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
 
 
 @pytest.mark.anyio

@@ -33,6 +33,7 @@ KAKAO_CHANNEL_ALLOWED_COMMANDS = {
     "counter",
     "cp",
     "league",
+    "events",
 }
 KAKAO_CHANNEL_HELP_ENTRIES = [
     (
@@ -69,6 +70,11 @@ KAKAO_CHANNEL_HELP_ENTRIES = [
         "/리그 포켓몬이름",
         "슈퍼/하이퍼리그 랭크1 개체값을 확인합니다.\n"
         "예시 : /리그 마릴리",
+    ),
+    (
+        "/포켓몬고이벤트",
+        "진행 중인 이벤트, 7일간의 예정 이벤트, 현재 레이드를 확인합니다.\n"
+        "예시 : /포켓몬고이벤트, /이벤트",
     ),
 ]
 

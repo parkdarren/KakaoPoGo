@@ -7,6 +7,7 @@ from datetime import date
 
 from app.admin_store import AdminStore, ChatUser
 from app.counters import format_counter_reply
+from app.events import EventDataUnavailableError, PokemonGoEventClient
 from app.pogo_api import (
     MegaUnavailableError,
     PogoApiClient,
@@ -91,6 +92,11 @@ BUILTIN_HELP_ENTRIES = [
         "예시 : /리그 마릴리, /리그 기라티나 어나더",
     ),
     (
+        "/포켓몬고이벤트",
+        "진행 중인 이벤트와 앞으로 7일간의 예정 이벤트, 현재 레이드를 확인합니다.\n"
+        "줄임말 : /이벤트, /일정",
+    ),
+    (
         "/오늘의포켓몬",
         "오늘의 파트너 포켓몬과 운세를 뽑고 출석체크가 됩니다.\n"
         f"하루 1회, 출석마다 {DAILY_CHECK_IN_POINTS}포인트 적립!\n"
@@ -149,6 +155,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "cp", query
     if command in ("리그", "league", "pvp"):
         return "league", query
+    if command in ("포켓몬고이벤트", "이벤트", "일정", "events"):
+        return "events", query
     if command in ("오늘의포켓몬", "출첵", "출석", "ㅊㅊ"):
         return "daily", query
     if command in ("출석랭킹", "출첵랭킹"):
@@ -210,10 +218,12 @@ class PokemonGoBot:
     def __init__(
         self,
         pogo_client: PogoApiClient | None = None,
+        event_client: PokemonGoEventClient | None = None,
         admin_store: AdminStore | None = None,
         owner_setup_code: str | None = None,
     ) -> None:
         self.pogo_client = pogo_client or PogoApiClient()
+        self.event_client = event_client or PokemonGoEventClient()
         self.admin_store = admin_store or AdminStore()
         self.owner_setup_code = (
             OWNER_SETUP_CODE if owner_setup_code is None else owner_setup_code
@@ -241,6 +251,14 @@ class PokemonGoBot:
 
         if command == "attendance_ranking":
             return BotResponse(self._handle_attendance_ranking(user))
+
+        if command == "events":
+            try:
+                return BotResponse(await self.event_client.format_schedule(days=7))
+            except EventDataUnavailableError:
+                return BotResponse(
+                    "포켓몬GO 이벤트 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+                )
 
         if command == "owner_setup":
             return BotResponse(self._handle_owner_setup(user, query))
@@ -704,6 +722,10 @@ class PokemonGoBot:
             "리그",
             "league",
             "pvp",
+            "포켓몬고이벤트",
+            "이벤트",
+            "일정",
+            "events",
             "오늘의포켓몬",
             "출첵",
             "출석",
