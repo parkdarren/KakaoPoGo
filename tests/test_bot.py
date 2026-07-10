@@ -25,6 +25,7 @@ def test_parse_new_commands() -> None:
     assert parse_command("/리그 마릴리") == ("league", "마릴리")
     assert parse_command("/오늘의포켓몬") == ("daily", "")
     assert parse_command("/출첵") == ("daily", "")
+    assert parse_command("/ㅊㅊ") == ("daily", "")
     assert parse_command("/출석랭킹") == ("attendance_ranking", "")
     assert parse_command("/스킬 피카츄") == ("moves", "피카츄")
     assert parse_command("/기술 디아루가") == ("moves", "디아루가")

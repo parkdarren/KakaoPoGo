@@ -93,7 +93,8 @@ BUILTIN_HELP_ENTRIES = [
     (
         "/오늘의포켓몬",
         "오늘의 파트너 포켓몬과 운세를 뽑고 출석체크가 됩니다.\n"
-        f"하루 1회, 출석마다 {DAILY_CHECK_IN_POINTS}포인트 적립!",
+        f"하루 1회, 출석마다 {DAILY_CHECK_IN_POINTS}포인트 적립!\n"
+        "줄임말 : /ㅊㅊ, /출첵, /출석",
     ),
     (
         "/출석랭킹",
@@ -148,7 +149,7 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "cp", query
     if command in ("리그", "league", "pvp"):
         return "league", query
-    if command in ("오늘의포켓몬", "출첵", "출석"):
+    if command in ("오늘의포켓몬", "출첵", "출석", "ㅊㅊ"):
         return "daily", query
     if command in ("출석랭킹", "출첵랭킹"):
         return "attendance_ranking", query
@@ -706,6 +707,7 @@ class PokemonGoBot:
             "오늘의포켓몬",
             "출첵",
             "출석",
+            "ㅊㅊ",
             "출석랭킹",
             "출첵랭킹",
             "오너등록",
