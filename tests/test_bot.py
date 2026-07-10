@@ -22,6 +22,7 @@ def test_parse_new_commands() -> None:
     assert parse_command("/대상방설정 레이드방") == ("target_set", "레이드방")
     assert parse_command("/대상방확인") == ("target_show", "")
     assert parse_command("/도움말") == ("help", "")
+    assert parse_command("/명령어") == ("help", "")
     assert parse_command("!도감 피카츄") is None
     assert parse_command("!공지") is None
     assert _is_silent_message("/도감 피카츄") is False
@@ -155,12 +156,19 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
     owner_help = await bot.handle("/도움말", room="레이드방", sender="오너")
     assert "/공지" in owner_help.reply
     assert "/도감 포켓몬이름" in owner_help.reply
+    assert "【 가르치기 목록 】" in owner_help.reply
+    assert "1. /공지" in owner_help.reply
+    assert "└ 가르친사람 : 오너" in owner_help.reply
+    assert "《답변1》오늘 레이드 8시" in owner_help.reply
     assert "/명령어목록" not in owner_help.reply
     assert "/명령어추가" not in owner_help.reply
     assert "/관리자승인" not in owner_help.reply
     assert "/오너등록" not in owner_help.reply
     assert "/권한확인" not in owner_help.reply
     assert "/관리자요청" not in owner_help.reply
+
+    alias_help = await bot.handle("/명령어", room="레이드방", sender="일반")
+    assert alias_help.reply == owner_help.reply
 
     deleted = await bot.handle("/명령어삭제 공지", room="레이드방", sender="오너")
     assert deleted.reply == "/공지 명령어를 삭제했습니다."

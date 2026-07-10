@@ -15,13 +15,32 @@ from app.pogo_api import (
 
 
 OWNER_SETUP_CODE = os.getenv("OWNER_SETUP_CODE", "change-me")
-PUBLIC_COMMANDS = [
-    "/도감 피카츄",
-    "/스킬 피카츄",
-    "/100 자시안 검왕",
-    "/약점 기라티나 오리진",
-    "/cp 피카츄 25 15/15/15",
-    "/도움말",
+BUILTIN_HELP_ENTRIES = [
+    (
+        "/도감 포켓몬이름",
+        "포켓몬 타입, 약점, 100% CP를 확인합니다.\n"
+        "예시 : /도감 디아루가, /도감 화이트큐레무",
+    ),
+    (
+        "/스킬 포켓몬이름",
+        "포켓몬GO 기술을 한글명으로 확인합니다.\n"
+        "예시 : /스킬 피카츄, /스킬 블랙큐레무",
+    ),
+    (
+        "/100 포켓몬이름",
+        "100% 개체값 CP만 빠르게 확인합니다.\n"
+        "예시 : /100 자시안 검왕",
+    ),
+    (
+        "/약점 포켓몬이름",
+        "타입, 약점, 저항을 확인합니다.\n"
+        "예시 : /약점 기라티나 오리진",
+    ),
+    (
+        "/cp 포켓몬이름 레벨 공격/방어/체력",
+        "원하는 레벨과 IV의 CP를 계산합니다.\n"
+        "예시 : /cp 피카츄 40 15/15/15",
+    ),
 ]
 ADMIN_COMMANDS = [
     "/대상방설정 공개방이름",
@@ -93,7 +112,7 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "custom_delete", query
     if command in ("명령어목록",):
         return "custom_list", query
-    if command in ("help", "도움말"):
+    if command in ("help", "도움말", "명령어"):
         return "help", ""
     if len(command) > 0:
         return "custom_run", command
@@ -422,43 +441,36 @@ class PokemonGoBot:
         return self._handle_command_list(user, target_room)
 
     def _handle_public_help(self, user: ChatUser) -> str:
-        lines = [
-            "【 포켓몬GO 봇 도움말 】",
-            "━━━━━━━━━━━━━━━━",
-            "1. /도감 포켓몬이름",
-            "└ 포켓몬 타입, 약점, 100% CP를 확인합니다.",
-            "└ 예시 : /도감 디아루가, /도감 화이트큐레무",
-            "",
-            "2. /스킬 포켓몬이름",
-            "└ 포켓몬GO 기술을 한글명으로 확인합니다.",
-            "└ 예시 : /스킬 피카츄, /스킬 블랙큐레무",
-            "",
-            "3. /100 포켓몬이름",
-            "└ 100% 개체값 CP만 빠르게 확인합니다.",
-            "└ 예시 : /100 자시안 검왕",
-            "",
-            "4. /약점 포켓몬이름",
-            "└ 타입, 약점, 저항을 확인합니다.",
-            "└ 예시 : /약점 기라티나 오리진",
-            "",
-            "5. /cp 포켓몬이름 레벨 공격/방어/체력",
-            "└ 원하는 레벨과 IV의 CP를 계산합니다.",
-            "└ 예시 : /cp 피카츄 40 15/15/15",
-        ]
+        lines = ["【 가르치기 목록 】", "━━━━━━━━━━━━━━━━"]
+        index = 1
+        for custom in self.admin_store.list_custom_command_records(user.room):
+            lines.extend(
+                self._format_help_entry(
+                    index,
+                    f"/{custom.display_command}",
+                    custom.response,
+                    custom.taught_by or custom.created_by,
+                    custom.taught_at or "등록일자 알 수 없음",
+                )
+            )
+            index += 1
 
-        custom_commands = self.admin_store.list_custom_commands(user.room)
-        if custom_commands:
-            lines.append("")
-            lines.append("【 방 명령어 】")
-            lines.append("━━━━━━━━━━━━━━━━")
-            for index, command in enumerate(custom_commands, start=1):
-                lines.append(f"{index}. /{command}")
-
+        for command, response in BUILTIN_HELP_ENTRIES:
+            lines.extend(
+                self._format_help_entry(
+                    index,
+                    command,
+                    response,
+                    "KakaoPoGo",
+                    "기본 기능",
+                )
+            )
+            index += 1
         return "\n".join(lines)
 
     def _handle_command_list(self, user: ChatUser, custom_room: str | None = None) -> str:
         role = self.admin_store.get_role(user)
-        lines = ["사용 가능한 명령어", *PUBLIC_COMMANDS]
+        lines = ["사용 가능한 명령어", *(command for command, _ in BUILTIN_HELP_ENTRIES), "/도움말", "/명령어"]
 
         custom_commands = self.admin_store.list_custom_commands(custom_room or user.room)
         if custom_commands:
@@ -528,7 +540,27 @@ class PokemonGoBot:
             "명령어목록",
             "help",
             "도움말",
+            "명령어",
         }
+
+    @staticmethod
+    def _format_help_entry(
+        index: int,
+        command: str,
+        response: str,
+        taught_by: str,
+        taught_at: str,
+    ) -> list[str]:
+        lines = [
+            f"{index}. {command}",
+            f"└ 가르친사람 : {taught_by}",
+            f"└ 가르친일자 : {taught_at}",
+            f"└ 명령어 : {command}",
+        ]
+        if response:
+            lines.append(f"《답변1》{response}")
+        lines.append("")
+        return lines
 
     @staticmethod
     def _parse_request_id(query: str) -> int | None:

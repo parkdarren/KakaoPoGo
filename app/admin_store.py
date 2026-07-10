@@ -30,8 +30,12 @@ class AdminRequest:
 class CustomCommand:
     room: str
     command: str
+    display_command: str
     response: str
     created_by: str
+    taught_by: str | None
+    taught_at: str | None
+    help_order: int | None
 
 
 class AdminStore:
@@ -94,6 +98,32 @@ class AdminStore:
                 );
                 """
             )
+            self._ensure_column(conn, "custom_commands", "display_command", "TEXT")
+            self._ensure_column(conn, "custom_commands", "taught_by", "TEXT")
+            self._ensure_column(conn, "custom_commands", "taught_at", "TEXT")
+            self._ensure_column(conn, "custom_commands", "help_order", "INTEGER")
+            conn.execute(
+                """
+                UPDATE custom_commands
+                SET display_command = COALESCE(display_command, command),
+                    taught_by = COALESCE(taught_by, created_by),
+                    taught_at = COALESCE(taught_at, updated_at)
+                """
+            )
+
+    @staticmethod
+    def _ensure_column(
+        conn: sqlite3.Connection,
+        table_name: str,
+        column_name: str,
+        column_type: str,
+    ) -> None:
+        columns = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name not in columns:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
 
     def has_owner(self, room: str) -> bool:
         with self._connect() as conn:
@@ -379,9 +409,68 @@ class AdminStore:
                 ON CONFLICT(room, command)
                 DO UPDATE SET response = excluded.response,
                               created_by = excluded.created_by,
-                              updated_at = CURRENT_TIMESTAMP
+                              updated_at = CURRENT_TIMESTAMP,
+                              display_command = excluded.command,
+                              taught_by = excluded.created_by,
+                              taught_at = CURRENT_TIMESTAMP,
+                              help_order = NULL
                 """,
                 (room, command, response, created_by),
+            )
+            conn.execute(
+                """
+                UPDATE custom_commands
+                SET display_command = COALESCE(display_command, command),
+                    taught_by = COALESCE(taught_by, created_by),
+                    taught_at = COALESCE(taught_at, updated_at)
+                WHERE room = ? AND command = ?
+                """,
+                (room, command),
+            )
+
+    def import_custom_command(
+        self,
+        room: str,
+        command: str,
+        display_command: str,
+        response: str,
+        taught_by: str,
+        taught_at: str,
+        help_order: int,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO custom_commands (
+                    room,
+                    command,
+                    display_command,
+                    response,
+                    created_by,
+                    taught_by,
+                    taught_at,
+                    help_order
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(room, command)
+                DO UPDATE SET display_command = excluded.display_command,
+                              response = excluded.response,
+                              created_by = excluded.created_by,
+                              taught_by = excluded.taught_by,
+                              taught_at = excluded.taught_at,
+                              help_order = excluded.help_order,
+                              updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    room,
+                    command,
+                    display_command,
+                    response,
+                    taught_by,
+                    taught_by,
+                    taught_at,
+                    help_order,
+                ),
             )
 
     def delete_custom_command(self, room: str, command: str) -> bool:
@@ -396,7 +485,14 @@ class AdminStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT room, command, response, created_by
+                SELECT room,
+                       command,
+                       COALESCE(display_command, command) AS display_command,
+                       response,
+                       created_by,
+                       taught_by,
+                       taught_at,
+                       help_order
                 FROM custom_commands
                 WHERE room = ? AND command = ?
                 """,
@@ -407,8 +503,12 @@ class AdminStore:
         return CustomCommand(
             room=row["room"],
             command=row["command"],
+            display_command=row["display_command"],
             response=row["response"],
             created_by=row["created_by"],
+            taught_by=row["taught_by"],
+            taught_at=row["taught_at"],
+            help_order=row["help_order"],
         )
 
     def list_custom_commands(self, room: str) -> list[str]:
@@ -423,6 +523,40 @@ class AdminStore:
                 (room,),
             ).fetchall()
         return [row["command"] for row in rows]
+
+    def list_custom_command_records(self, room: str) -> list[CustomCommand]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT room,
+                       command,
+                       COALESCE(display_command, command) AS display_command,
+                       response,
+                       created_by,
+                       taught_by,
+                       taught_at,
+                       help_order
+                FROM custom_commands
+                WHERE room = ?
+                ORDER BY CASE WHEN help_order IS NULL THEN 1 ELSE 0 END,
+                         help_order,
+                         command
+                """,
+                (room,),
+            ).fetchall()
+        return [
+            CustomCommand(
+                room=row["room"],
+                command=row["command"],
+                display_command=row["display_command"],
+                response=row["response"],
+                created_by=row["created_by"],
+                taught_by=row["taught_by"],
+                taught_at=row["taught_at"],
+                help_order=row["help_order"],
+            )
+            for row in rows
+        ]
 
     def set_control_target(
         self,
