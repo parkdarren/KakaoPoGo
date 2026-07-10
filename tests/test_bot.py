@@ -101,8 +101,10 @@ def test_kakao_skill_returns_simple_text_response() -> None:
     assert body["version"] == "2.0"
     outputs = body["template"]["outputs"]
     assert 1 <= len(outputs) <= 3
-    assert "【 가르치기 목록 】" in outputs[0]["simpleText"]["text"]
+    assert "【 포켓몬GO 정보 명령어 】" in outputs[0]["simpleText"]["text"]
     assert "/도감 포켓몬이름" in outputs[0]["simpleText"]["text"]
+    assert "/관리자요청" not in outputs[0]["simpleText"]["text"]
+    assert "/명령어등록" not in outputs[0]["simpleText"]["text"]
     assert body["template"]["quickReplies"][0]["messageText"] == "/도움말"
 
 
@@ -121,6 +123,7 @@ def test_kakao_skill_uses_action_params_when_utterance_is_missing() -> None:
     assert response.status_code == 200
     text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
     assert "/스킬 포켓몬이름" in text
+    assert "가르친사람" not in text
 
 
 def test_kakao_skill_test_payload_prefers_command_param() -> None:
@@ -141,6 +144,7 @@ def test_kakao_skill_test_payload_prefers_command_param() -> None:
     assert response.status_code == 200
     text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
     assert "/도감 포켓몬이름" in text
+    assert "/권한확인" not in text
 
 
 def test_kakao_skill_reads_detail_param_origin() -> None:
@@ -164,6 +168,47 @@ def test_kakao_skill_reads_detail_param_origin() -> None:
     assert response.status_code == 200
     text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
     assert "/스킬 포켓몬이름" in text
+
+
+def test_kakao_skill_blocks_openchat_admin_commands() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/kakao/skill",
+        json={
+            "userRequest": {
+                "utterance": "/권한확인",
+                "user": {"id": "channel-user-1"},
+            },
+            "bot": {"id": "pogo-channel"},
+            "action": {"params": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+    assert "포켓몬GO 정보 조회만 지원합니다" in text
+    assert "권한 확인" not in text
+
+
+def test_kakao_skill_blocks_openchat_custom_commands() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/kakao/skill",
+        json={
+            "userRequest": {
+                "utterance": "/공지",
+                "user": {"id": "channel-user-1"},
+            },
+            "bot": {"id": "pogo-channel"},
+            "action": {"params": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+    assert "포켓몬GO 정보 조회만 지원합니다" in text
 
 
 def test_kakao_skill_guides_non_slash_messages() -> None:

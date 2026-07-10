@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from app.bot import PokemonGoBot
+from app.bot import PokemonGoBot, parse_command
 from app.pogo_api import PogoApiClient, format_dex_reply
 
 
@@ -23,6 +23,54 @@ def _verify_bridge_key(x_bridge_key: str | None = Header(default=None)) -> None:
 app = FastAPI(title="KakaoPoGo Bot", version="0.1.0")
 bot = PokemonGoBot()
 pogo = PogoApiClient()
+
+KAKAO_CHANNEL_ALLOWED_COMMANDS = {
+    "help",
+    "dex",
+    "moves",
+    "perfect",
+    "weakness",
+    "counter",
+    "cp",
+    "league",
+}
+KAKAO_CHANNEL_HELP_ENTRIES = [
+    (
+        "/도감 포켓몬이름",
+        "포켓몬 타입, 약점, 100% CP를 확인합니다.\n"
+        "예시 : /도감 디아루가, /도감 화이트큐레무",
+    ),
+    (
+        "/스킬 포켓몬이름",
+        "포켓몬GO 기술을 한글명으로 확인합니다.\n"
+        "예시 : /스킬 피카츄, /스킬 블랙큐레무",
+    ),
+    (
+        "/100 포켓몬이름",
+        "100% 개체값 CP만 빠르게 확인합니다.\n"
+        "예시 : /100 자시안 검왕",
+    ),
+    (
+        "/약점 포켓몬이름",
+        "타입, 약점, 저항을 확인합니다.\n"
+        "예시 : /약점 기라티나 오리진",
+    ),
+    (
+        "/카운터 포켓몬이름",
+        "레이드 상대할 때 좋은 카운터 포켓몬을 확인합니다.\n"
+        "예시 : /카운터 뮤츠",
+    ),
+    (
+        "/cp 포켓몬이름 레벨 공격/방어/체력",
+        "원하는 레벨과 IV의 CP를 계산합니다.\n"
+        "예시 : /cp 피카츄 40 15/15/15",
+    ),
+    (
+        "/리그 포켓몬이름",
+        "슈퍼/하이퍼리그 랭크1 개체값을 확인합니다.\n"
+        "예시 : /리그 마릴리",
+    ),
+]
 
 
 class CommandRequest(BaseModel):
@@ -78,6 +126,23 @@ def _kakao_simple_text_response(reply: str) -> dict[str, Any]:
             ],
         },
     }
+
+
+def _kakao_channel_help() -> str:
+    lines = ["【 포켓몬GO 정보 명령어 】", "━━━━━━━━━━━━━━━━"]
+    for index, (command, description) in enumerate(KAKAO_CHANNEL_HELP_ENTRIES, start=1):
+        lines.append(f"{index}. {command}")
+        for line in description.splitlines():
+            lines.append(f"└ {line}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def _kakao_channel_restricted_reply() -> str:
+    return (
+        "카카오톡 채널에서는 포켓몬GO 정보 조회만 지원합니다.\n"
+        "/도움말 을 입력하면 사용할 수 있는 명령어를 볼 수 있습니다."
+    )
 
 
 def _split_kakao_text(text: str) -> list[str]:
@@ -181,6 +246,17 @@ async def kakao_skill(request: KakaoSkillRequest) -> dict[str, Any]:
     if _is_silent_message(text):
         reply = "명령어는 /로 시작해 주세요.\n예: /도감 피카츄"
         return _kakao_simple_text_response(reply)
+
+    parsed = parse_command(text)
+    if parsed is None:
+        return _kakao_simple_text_response(_kakao_channel_restricted_reply())
+
+    command, _query = parsed
+    if command == "help":
+        return _kakao_simple_text_response(_kakao_channel_help())
+
+    if command not in KAKAO_CHANNEL_ALLOWED_COMMANDS:
+        return _kakao_simple_text_response(_kakao_channel_restricted_reply())
 
     sender, user_key = _extract_kakao_user(request)
     response = await bot.handle(
