@@ -1,4 +1,5 @@
 const SERVER_URL = "http://YOUR_SERVER_IP:8000/command";
+const SCRIPT_VERSION = "kakaopogo-2026-07-10-silent-v2";
 
 function response(room, msg, sender, isGroupChat, replier, imageDB, packageName) {
   const text = String(msg || "").trim();

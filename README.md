@@ -16,6 +16,7 @@ weaknesses, forms, aliases, and room-specific custom commands.
 - Short aliases such as `디아`, `alg`, and `루가` for frequent room searches.
 - Role-based owner/admin management for room custom commands.
 - Public `!도움말` output that excludes owner/admin-only commands.
+- Room-specific custom commands with `!명령어등록`, `!명령어수정`, and `!명령어삭제`.
 - KakaoTalk bridge scripts for MessengerBotR-style notification bot runners.
 - Optional Android notification bridge project.
 

@@ -27,6 +27,7 @@ PUBLIC_COMMANDS = [
 ADMIN_COMMANDS = [
     "!대상방설정 공개방이름",
     "!대상방확인",
+    "!명령어등록 공지 내용",
     "!명령어추가 공지 내용",
     "!명령어수정 공지 새내용",
     "!명령어삭제 공지",
@@ -81,7 +82,7 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "target_set", query
     if command in ("!대상방확인",):
         return "target_show", query
-    if command in ("!명령어추가", "!명령어수정"):
+    if command in ("!명령어등록", "!명령어추가", "!명령어수정"):
         return "custom_upsert", query
     if command in ("!명령어삭제",):
         return "custom_delete", query
@@ -280,6 +281,12 @@ class PokemonGoBot:
             if self.admin_store.is_owner(user):
                 self.admin_store.replace_owner(user)
                 return "이미 이 방의 owner로 등록되어 있습니다."
+            if (
+                self.admin_store.has_only_legacy_owner(user.room)
+                and not user.user_key.startswith("sender:")
+            ):
+                self.admin_store.replace_owner(user)
+                return "이 방의 owner 인증 정보를 현재 프로필 기준으로 안정화했습니다."
             return "이 방에는 이미 owner가 등록되어 있습니다."
 
         self.admin_store.add_owner(user)
@@ -375,7 +382,7 @@ class PokemonGoBot:
 
         parsed = self._parse_custom_upsert(query)
         if parsed is None:
-            return "형식은 이렇게 입력해 주세요. 예: !명령어추가 공지 오늘 레이드 8시"
+            return "형식은 이렇게 입력해 주세요. 예: !명령어등록 공지 오늘 레이드 8시"
 
         command, response = parsed
         self.admin_store.upsert_custom_command(
@@ -500,6 +507,7 @@ class PokemonGoBot:
             "대상방설정",
             "대상방확인",
             "명령어추가",
+            "명령어등록",
             "명령어수정",
             "명령어삭제",
             "명령어목록",

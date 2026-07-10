@@ -1,4 +1,5 @@
 const scriptName = "KakaoPoGo";
+const SCRIPT_VERSION = "kakaopogo-2026-07-10-silent-v2";
 
 // VPS server: http://YOUR_SERVER_IP:8000/command
 // If your server IP changes, update this URL.

@@ -56,6 +56,12 @@ Owner/admin commands are handled by the backend and are intentionally hidden fro
 the public `!도움말` response. Use a separate management room if you do not want
 regular users to see management messages typed into KakaoTalk.
 
+Custom room commands can be saved with:
+
+```text
+!명령어등록 공지 오늘 레이드 8시
+```
+
 ## Caveat
 
 This is a practical notification-based open-chat integration. It is not an

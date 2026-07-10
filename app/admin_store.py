@@ -103,6 +103,18 @@ class AdminStore:
             ).fetchone()
         return row is not None
 
+    def has_only_legacy_owner(self, room: str) -> bool:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_key
+                FROM room_admins
+                WHERE room = ? AND role = 'owner'
+                """,
+                (room,),
+            ).fetchall()
+        return bool(rows) and all(row["user_key"].startswith("sender:") for row in rows)
+
     def get_role(self, user: ChatUser) -> str | None:
         with self._connect() as conn:
             row = conn.execute(

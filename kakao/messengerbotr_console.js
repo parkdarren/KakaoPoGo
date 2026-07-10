@@ -1,5 +1,6 @@
 const bot = BotManager.getCurrentBot();
 const SERVER_URL = "http://YOUR_SERVER_IP:8000/command";
+const SCRIPT_VERSION = "kakaopogo-2026-07-10-silent-v2";
 
 function onMessage(msg) {
   const text = String(msg.content || "").trim();
