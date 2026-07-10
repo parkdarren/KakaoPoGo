@@ -21,6 +21,7 @@ class MegaUnavailablePogoClient:
 def test_parse_new_commands() -> None:
     assert parse_command("/100 자시안 검왕") == ("perfect", "자시안 검왕")
     assert parse_command("/약점 기라티나 오리진") == ("weakness", "기라티나 오리진")
+    assert parse_command("/카운터 뮤츠") == ("counter", "뮤츠")
     assert parse_command("/스킬 피카츄") == ("moves", "피카츄")
     assert parse_command("/기술 디아루가") == ("moves", "디아루가")
     assert parse_command("/cp 피카츄 25 15/15/15") == ("cp", "피카츄 25 15/15/15")

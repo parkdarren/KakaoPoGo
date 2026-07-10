@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +53,8 @@ class PokemonDexEntry:
     weaknesses: list[str]
     resistances: list[str]
     weather_boosts: list[str]
+    # (한글 타입명, 배율) 목록. 배율이 큰 약점(2중 약점)이 먼저 온다.
+    weakness_details: list[tuple[str, float]] = field(default_factory=list)
 
 
 class PogoApiClient:
@@ -90,7 +92,7 @@ class PogoApiClient:
         weather_boosts = await self._fetch_json("weather_boosts.json")
 
         pokemon_types = types.get("type", [])
-        weaknesses, resistances = self._calculate_matchups(
+        weakness_details, resistances = self._calculate_matchups(
             pokemon_types,
             type_effectiveness,
         )
@@ -119,9 +121,10 @@ class PogoApiClient:
             elite_fast_moves=moves.get("elite_fast_moves", []),
             elite_charged_moves=moves.get("elite_charged_moves", []),
             perfect_cps=perfect_cps,
-            weaknesses=weaknesses,
+            weaknesses=[name for name, _ in weakness_details],
             resistances=resistances,
             weather_boosts=self._weather_for_types(pokemon_types, weather_boosts),
+            weakness_details=weakness_details,
         )
 
     async def _get_mega_entry(self, resolved: ResolvedPokemon) -> PokemonDexEntry:
@@ -157,7 +160,7 @@ class PogoApiClient:
         weather_boosts = await self._fetch_json("weather_boosts.json")
 
         pokemon_types = mega.get("type", [])
-        weaknesses, resistances = self._calculate_matchups(
+        weakness_details, resistances = self._calculate_matchups(
             pokemon_types,
             type_effectiveness,
         )
@@ -185,9 +188,10 @@ class PogoApiClient:
                 base_stamina,
                 cpm_by_level,
             ),
-            weaknesses=weaknesses,
+            weaknesses=[name for name, _ in weakness_details],
             resistances=resistances,
             weather_boosts=self._weather_for_types(pokemon_types, weather_boosts),
+            weakness_details=weakness_details,
         )
 
     @staticmethod
@@ -298,17 +302,18 @@ class PogoApiClient:
     def _calculate_matchups(
         defender_types: list[str],
         type_effectiveness: dict[str, dict[str, float]],
-    ) -> tuple[list[str], list[str]]:
-        weaknesses: list[str] = []
+    ) -> tuple[list[tuple[str, float]], list[str]]:
+        weaknesses: list[tuple[str, float]] = []
         resistances: list[str] = []
         for attack_type, defenders in type_effectiveness.items():
             multiplier = 1.0
             for defender_type in defender_types:
                 multiplier *= float(defenders.get(defender_type, 1))
             if multiplier > 1:
-                weaknesses.append(ko_type(attack_type))
+                weaknesses.append((ko_type(attack_type), multiplier))
             elif multiplier < 1:
                 resistances.append(ko_type(attack_type))
+        weaknesses.sort(key=lambda item: item[1], reverse=True)
         return weaknesses, resistances
 
     @staticmethod

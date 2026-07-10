@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from app.admin_store import AdminStore, ChatUser
+from app.counters import format_counter_reply
 from app.pogo_api import (
     MegaUnavailableError,
     PogoApiClient,
@@ -39,7 +40,8 @@ BUILTIN_HELP_ENTRIES = [
     (
         "/도감 포켓몬이름",
         "포켓몬 타입, 약점, 100% CP를 확인합니다.\n"
-        "예시 : /도감 디아루가, /도감 화이트큐레무",
+        "메가진화와 이름 일부만 입력해도 됩니다.\n"
+        "예시 : /도감 디아루가, /도감 메가리자몽Y, /도감 디아",
     ),
     (
         "/스킬 포켓몬이름",
@@ -55,6 +57,11 @@ BUILTIN_HELP_ENTRIES = [
         "/약점 포켓몬이름",
         "타입, 약점, 저항을 확인합니다.\n"
         "예시 : /약점 기라티나 오리진",
+    ),
+    (
+        "/카운터 포켓몬이름",
+        "레이드 상대할 때 좋은 카운터 포켓몬을 추천합니다.\n"
+        "예시 : /카운터 뮤츠, /카운터 메가레쿠쟈",
     ),
     (
         "/cp 포켓몬이름 레벨 공격/방어/체력",
@@ -102,6 +109,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "perfect", query
     if command in ("약점", "weak"):
         return "weakness", query
+    if command in ("카운터", "counter"):
+        return "counter", query
     if command in ("스킬", "기술", "skill", "moves"):
         return "moves", query
     if command in ("cp",):
@@ -275,6 +284,19 @@ class PokemonGoBot:
             except PogoDataUnavailableError:
                 return BotResponse(DATA_UNAVAILABLE_MESSAGE)
             return BotResponse(format_weakness_reply(entry))
+
+        if command == "counter":
+            if not query:
+                return BotResponse("포켓몬 이름을 같이 입력해 주세요. 예: /카운터 뮤츠")
+            try:
+                entry = await self.pogo_client.get_dex_entry(query)
+            except MegaUnavailableError:
+                return BotResponse(f"'{query}' 메가진화는 아직 포켓몬GO에 없습니다.")
+            except LookupError:
+                return BotResponse(f"'{query}' 포켓몬을 찾지 못했습니다.")
+            except PogoDataUnavailableError:
+                return BotResponse(DATA_UNAVAILABLE_MESSAGE)
+            return BotResponse(format_counter_reply(entry))
 
         if command == "moves":
             if not query:
@@ -566,6 +588,8 @@ class PokemonGoBot:
             "백",
             "약점",
             "weak",
+            "카운터",
+            "counter",
             "스킬",
             "기술",
             "skill",
