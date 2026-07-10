@@ -14,6 +14,7 @@ def test_parse_new_commands() -> None:
     assert parse_command("!cp 피카츄 25 15/15/15") == ("cp", "피카츄 25 15/15/15")
     assert parse_command("!오너등록 change-me") == ("owner_setup", "change-me")
     assert parse_command("!관리자요청") == ("admin_request", "")
+    assert parse_command("!권한확인") == ("role_check", "")
     assert parse_command("!관리자승인 1") == ("admin_approve", "1")
     assert parse_command("!명령어등록 공지 내용") == ("custom_upsert", "공지 내용")
     assert parse_command("!명령어추가 공지 내용") == ("custom_upsert", "공지 내용")
@@ -184,12 +185,17 @@ async def test_owner_setup_does_not_replace_existing_owner(tmp_path) -> None:
     store = AdminStore(tmp_path / "test.sqlite3")
     bot = PokemonGoBot(admin_store=store)
 
-    await bot.handle("!오너등록 change-me", room="레이드방", sender="이전오너")
+    await bot.handle(
+        "!오너등록 change-me",
+        room="레이드방",
+        sender="이전오너",
+        user_key="hash:previous-owner",
+    )
     blocked = await bot.handle("!오너등록 change-me", room="레이드방", sender="현재오너")
 
     admins = store.list_admin_records("레이드방")
     assert blocked.reply == "이 방에는 이미 owner가 등록되어 있습니다."
-    assert admins == [("이전오너", "owner", "sender:이전오너")]
+    assert admins == [("이전오너", "owner", "hash:previous-owner")]
 
 
 @pytest.mark.anyio
@@ -208,6 +214,30 @@ async def test_owner_setup_can_upgrade_legacy_owner_to_stable_key(tmp_path) -> N
     admins = store.list_admin_records("레이드방")
     assert upgraded.reply == "이 방의 owner 인증 정보를 현재 프로필 기준으로 안정화했습니다."
     assert admins == [("현재오너", "owner", "hash:stable-owner")]
+
+
+@pytest.mark.anyio
+async def test_global_owner_can_manage_room_when_profile_matches(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+
+    await bot.handle("!오너등록 change-me", room="개인방", sender="오너")
+    saved = await bot.handle(
+        "!명령어등록 공지 전역 오너 테스트",
+        room="공개방",
+        sender="오너",
+        user_key="hash:owner",
+    )
+    role = await bot.handle(
+        "!권한확인",
+        room="공개방",
+        sender="오너",
+        user_key="hash:owner",
+    )
+
+    assert saved.reply == "!공지 명령어를 저장했습니다."
+    assert "권한: owner" in role.reply
+    assert "식별 방식: hash 기반" in role.reply
 
 
 @pytest.mark.anyio

@@ -21,6 +21,7 @@ PUBLIC_COMMANDS = [
     "!100 자시안 검왕",
     "!약점 기라티나 오리진",
     "!cp 피카츄 25 15/15/15",
+    "!권한확인",
     "!관리자요청",
     "!도움말",
 ]
@@ -68,6 +69,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "owner_setup", query
     if command in ("!관리자요청",):
         return "admin_request", query
+    if command in ("!권한확인", "!role"):
+        return "role_check", query
     if command in ("!관리자요청목록",):
         return "admin_request_list", query
     if command in ("!관리자승인",):
@@ -146,6 +149,9 @@ class PokemonGoBot:
 
         if command == "admin_request":
             return BotResponse(self._handle_admin_request(user))
+
+        if command == "role_check":
+            return BotResponse(self._handle_role_check(target_user))
 
         if command == "admin_request_list":
             return BotResponse(self._handle_admin_request_list(target_user))
@@ -281,10 +287,7 @@ class PokemonGoBot:
             if self.admin_store.is_owner(user):
                 self.admin_store.replace_owner(user)
                 return "이미 이 방의 owner로 등록되어 있습니다."
-            if (
-                self.admin_store.has_only_legacy_owner(user.room)
-                and not user.user_key.startswith("sender:")
-            ):
+            if self.admin_store.has_only_legacy_owner(user.room):
                 self.admin_store.replace_owner(user)
                 return "이 방의 owner 인증 정보를 현재 프로필 기준으로 안정화했습니다."
             return "이 방에는 이미 owner가 등록되어 있습니다."
@@ -298,6 +301,19 @@ class PokemonGoBot:
 
         request_id = self.admin_store.add_admin_request(user)
         return f"관리자 요청을 받았습니다. owner 승인을 기다려 주세요. 요청번호: {request_id}"
+
+    def _handle_role_check(self, user: ChatUser) -> str:
+        role = self.admin_store.get_effective_role(user) or "없음"
+        key_type = "hash 기반" if not user.user_key.startswith("sender:") else "닉네임 기반"
+        return "\n".join(
+            [
+                "권한 확인",
+                f"방: {user.room}",
+                f"프로필: {user.sender}",
+                f"식별 방식: {key_type}",
+                f"권한: {role}",
+            ]
+        )
 
     def _handle_admin_request_list(self, user: ChatUser) -> str:
         if not self.admin_store.is_owner(user):
@@ -499,6 +515,8 @@ class PokemonGoBot:
             "오너등록",
             "owner",
             "관리자요청",
+            "권한확인",
+            "role",
             "관리자요청목록",
             "관리자승인",
             "관리자거절",

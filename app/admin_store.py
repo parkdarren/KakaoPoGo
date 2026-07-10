@@ -141,6 +141,54 @@ class AdminStore:
                 return row["role"]
         return None
 
+    def get_effective_role(self, user: ChatUser) -> str | None:
+        room_role = self.get_role(user)
+        if room_role:
+            return room_role
+        if self.is_global_owner(user):
+            return "owner"
+        return None
+
+    def is_global_owner(self, user: ChatUser) -> bool:
+        with self._connect() as conn:
+            if not user.user_key.startswith("sender:"):
+                row = conn.execute(
+                    """
+                    SELECT 1
+                    FROM room_admins
+                    WHERE user_key = ? AND role = 'owner'
+                    LIMIT 1
+                    """,
+                    (user.user_key,),
+                ).fetchone()
+                if row:
+                    return True
+
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM room_admins
+                WHERE display_name = ? AND role = 'owner'
+                LIMIT 1
+                """,
+                (user.sender,),
+            ).fetchone()
+            if not row:
+                return False
+
+            if not user.user_key.startswith("sender:"):
+                conn.execute(
+                    """
+                    UPDATE room_admins
+                    SET user_key = ?, display_name = ?
+                    WHERE display_name = ?
+                      AND role = 'owner'
+                      AND user_key LIKE 'sender:%'
+                    """,
+                    (user.user_key, user.sender, user.sender),
+                )
+            return True
+
     @staticmethod
     def _promote_admin_key(
         conn: sqlite3.Connection,
@@ -164,10 +212,10 @@ class AdminStore:
             pass
 
     def is_owner(self, user: ChatUser) -> bool:
-        return self.get_role(user) == "owner"
+        return self.get_effective_role(user) == "owner"
 
     def is_admin_or_owner(self, user: ChatUser) -> bool:
-        return self.get_role(user) in {"owner", "admin"}
+        return self.get_effective_role(user) in {"owner", "admin"}
 
     def add_owner(self, user: ChatUser) -> None:
         self._upsert_admin(user, "owner")
