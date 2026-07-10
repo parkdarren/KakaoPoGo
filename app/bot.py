@@ -95,6 +95,10 @@ BUILTIN_HELP_ENTRIES = [
         "오늘의 파트너 포켓몬과 운세를 뽑고 출석체크가 됩니다.\n"
         f"하루 1회, 출석마다 {DAILY_CHECK_IN_POINTS}포인트 적립!",
     ),
+    (
+        "/출석랭킹",
+        "이 방의 출석 순위를 상위 10명까지 보여줍니다.",
+    ),
 ]
 ADMIN_COMMANDS = [
     "/대상방설정 공개방이름",
@@ -146,6 +150,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "league", query
     if command in ("오늘의포켓몬", "출첵", "출석"):
         return "daily", query
+    if command in ("출석랭킹", "출첵랭킹"):
+        return "attendance_ranking", query
     if command in ("오너등록", "owner"):
         return "owner_setup", query
     if command in ("관리자요청",):
@@ -231,6 +237,9 @@ class PokemonGoBot:
 
         if command == "daily":
             return BotResponse(self._handle_daily(user))
+
+        if command == "attendance_ranking":
+            return BotResponse(self._handle_attendance_ranking(user))
 
         if command == "owner_setup":
             return BotResponse(self._handle_owner_setup(user, query))
@@ -467,6 +476,18 @@ class PokemonGoBot:
         lines.append(f"보유 포인트: {points}P")
         return "\n".join(lines)
 
+    def _handle_attendance_ranking(self, user: ChatUser) -> str:
+        ranking = self.admin_store.attendance_ranking(user.room, limit=10)
+        if not ranking:
+            return "아직 출석한 사람이 없어요. /오늘의포켓몬 으로 첫 출석을 해보세요!"
+
+        lines = ["[출석 랭킹 TOP 10]"]
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        for rank, (display_name, total_days, points) in enumerate(ranking, start=1):
+            marker = medals.get(rank, f"{rank}.")
+            lines.append(f"{marker} {display_name} - {total_days}일 / {points}P")
+        return "\n".join(lines)
+
     @staticmethod
     def _daily_pick(seed: str, options: list[str]) -> str:
         digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
@@ -685,6 +706,8 @@ class PokemonGoBot:
             "오늘의포켓몬",
             "출첵",
             "출석",
+            "출석랭킹",
+            "출첵랭킹",
             "오너등록",
             "owner",
             "관리자요청",

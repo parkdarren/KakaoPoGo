@@ -253,6 +253,28 @@ class AdminStore:
             )
             return total_days, points, True
 
+    def attendance_ranking(
+        self,
+        room: str,
+        limit: int = 10,
+    ) -> list[tuple[str, int, int]]:
+        """방의 출석 순위를 (닉네임, 누적일수, 포인트)로 돌려준다."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT display_name, total_days, points
+                FROM attendance
+                WHERE room = ?
+                ORDER BY points DESC, total_days DESC, display_name ASC
+                LIMIT ?
+                """,
+                (room, limit),
+            ).fetchall()
+        return [
+            (row["display_name"], row["total_days"], row["points"])
+            for row in rows
+        ]
+
     def is_owner(self, user: ChatUser) -> bool:
         return self.get_effective_role(user) == "owner"
 

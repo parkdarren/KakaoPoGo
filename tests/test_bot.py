@@ -25,6 +25,7 @@ def test_parse_new_commands() -> None:
     assert parse_command("/리그 마릴리") == ("league", "마릴리")
     assert parse_command("/오늘의포켓몬") == ("daily", "")
     assert parse_command("/출첵") == ("daily", "")
+    assert parse_command("/출석랭킹") == ("attendance_ranking", "")
     assert parse_command("/스킬 피카츄") == ("moves", "피카츄")
     assert parse_command("/기술 디아루가") == ("moves", "디아루가")
     assert parse_command("/cp 피카츄 25 15/15/15") == ("cp", "피카츄 25 15/15/15")
@@ -125,6 +126,46 @@ async def test_daily_pokemon_checks_in_once_per_day(tmp_path) -> None:
     other_user = ChatUser(room="레이드방", sender="웅이", user_key="hash:brock")
     other = bot._handle_daily(other_user, today=date(2026, 7, 11))
     assert "(누적 1일)" in other
+
+
+@pytest.mark.anyio
+async def test_attendance_ranking_shows_top_ten(tmp_path) -> None:
+    from datetime import date
+
+    from app.admin_store import ChatUser
+
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+
+    empty = await bot.handle("/출석랭킹", room="레이드방", sender="지우")
+    assert "아직 출석한 사람이 없어요" in empty.reply
+
+    # 12명이 서로 다른 누적 일수로 출석한 상황을 만든다.
+    for index in range(12):
+        user = ChatUser(
+            room="레이드방",
+            sender=f"유저{index:02d}",
+            user_key=f"hash:user{index}",
+        )
+        for day in range(index + 1):
+            bot._handle_daily(user, today=date(2026, 7, 1 + day))
+
+    ranking = await bot.handle("/출석랭킹", room="레이드방", sender="지우")
+    lines = ranking.reply.split("\n")
+
+    assert lines[0] == "[출석 랭킹 TOP 10]"
+    assert len(lines) == 11  # 제목 + 10명
+    assert lines[1] == "🥇 유저11 - 12일 / 60P"
+    assert lines[2] == "🥈 유저10 - 11일 / 55P"
+    assert lines[3] == "🥉 유저09 - 10일 / 50P"
+    assert lines[4] == "4. 유저08 - 9일 / 45P"
+    assert "유저00" not in ranking.reply
+    assert "유저01" not in ranking.reply
+
+    other_room = await bot.handle("/출석랭킹", room="다른방", sender="지우")
+    assert "아직 출석한 사람이 없어요" in other_room.reply
 
 
 @pytest.mark.anyio
