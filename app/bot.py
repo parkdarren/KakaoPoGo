@@ -304,13 +304,11 @@ class PokemonGoBot:
 
     def _handle_role_check(self, user: ChatUser) -> str:
         role = self.admin_store.get_effective_role(user) or "없음"
-        key_type = "hash 기반" if not user.user_key.startswith("sender:") else "닉네임 기반"
         return "\n".join(
             [
                 "권한 확인",
                 f"방: {user.room}",
                 f"프로필: {user.sender}",
-                f"식별 방식: {key_type}",
                 f"권한: {role}",
             ]
         )
