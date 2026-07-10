@@ -123,6 +123,49 @@ def test_kakao_skill_uses_action_params_when_utterance_is_missing() -> None:
     assert "/스킬 포켓몬이름" in text
 
 
+def test_kakao_skill_test_payload_prefers_command_param() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/kakao/skill",
+        json={
+            "userRequest": {
+                "utterance": "발화 내용",
+                "user": {"id": "channel-user-1"},
+            },
+            "bot": {"id": "pogo-channel"},
+            "action": {"params": {"command": "/도움말"}, "detailParams": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+    assert "/도감 포켓몬이름" in text
+
+
+def test_kakao_skill_reads_detail_param_origin() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/kakao/skill",
+        json={
+            "userRequest": {
+                "utterance": "발화 내용",
+                "user": {"id": "channel-user-1"},
+            },
+            "bot": {"id": "pogo-channel"},
+            "action": {
+                "params": {},
+                "detailParams": {"command": {"origin": "/도움말", "value": "/도움말"}},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+    assert "/스킬 포켓몬이름" in text
+
+
 def test_kakao_skill_guides_non_slash_messages() -> None:
     client = TestClient(app)
 

@@ -104,15 +104,31 @@ def _split_kakao_text(text: str) -> list[str]:
 
 
 def _extract_kakao_skill_text(request: KakaoSkillRequest) -> str:
-    utterance = str(request.userRequest.get("utterance") or "").strip()
-    if utterance:
-        return utterance
+    param_texts: list[str] = []
+    detail_params = request.action.get("detailParams") or {}
+    for value in detail_params.values():
+        if isinstance(value, dict):
+            for key in ("origin", "value"):
+                text = str(value.get(key) or "").strip()
+                if text:
+                    param_texts.append(text)
 
     params = request.action.get("params") or {}
     for value in params.values():
         text = str(value or "").strip()
         if text:
+            param_texts.append(text)
+
+    for text in param_texts:
+        if text.startswith("/"):
             return text
+
+    utterance = str(request.userRequest.get("utterance") or "").strip()
+    if utterance and utterance != "발화 내용":
+        return utterance
+
+    if param_texts:
+        return param_texts[0]
     return ""
 
 
