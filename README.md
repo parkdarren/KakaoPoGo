@@ -114,12 +114,50 @@ http://YOUR_SERVER_IP:8000/kakao/skill
 관리자센터에서 HTTPS 주소만 허용되는 환경이라면 도메인과 SSL을 붙인 뒤
 같은 경로(`/kakao/skill`)를 등록하면 됩니다.
 
-VPS 배포는 [deploy/IWINV_VPS.md](deploy/IWINV_VPS.md) 참고. 환경변수는 두 개입니다:
+디스코드 봇으로도 같은 서버를 쓸 수 있습니다. 디스코드는 카카오처럼 HTTP
+스킬 서버를 호출하는 방식이 아니라, 봇 프로세스가 Discord Gateway에 계속
+접속해 있는 방식입니다.
+
+```bash
+DISCORD_BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN \
+DISCORD_GUILD_ID=YOUR_TEST_SERVER_ID \
+python -m app.discord_bot
+```
+
+기본은 디스코드 슬래시 명령어입니다:
+
+```text
+/도감 포켓몬:디아루가
+/스킬 포켓몬:피카츄
+/100 포켓몬:자시안 검왕
+/약점 포켓몬:기라티나 오리진
+/카운터 포켓몬:뮤츠
+/cp 포켓몬:피카츄 레벨:40 공격:15 방어:15 체력:15
+/리그 포켓몬:마릴리
+/오늘의포켓몬
+/출석랭킹
+```
+
+오픈채팅 운영 기능도 같은 DB를 사용합니다. `/오너등록`, `/관리자요청`,
+`/명령어등록`, `/명령어삭제`, `/명령어목록`을 디스코드 슬래시 명령어로
+쓸 수 있습니다. 등록한 커스텀 명령어는 `/명령어실행 명령어:공지`처럼
+실행합니다.
+
+커스텀 명령어를 오픈채팅처럼 `/공지` 일반 메시지로도 받고 싶다면
+Discord Developer Portal에서 Message Content Intent를 켠 뒤,
+`DISCORD_ENABLE_PREFIX=true`로 실행합니다. 이 옵션은 선택 사항입니다.
+
+VPS 배포는 [deploy/IWINV_VPS.md](deploy/IWINV_VPS.md) 참고. 주요 환경변수는 아래와 같습니다:
 
 - `BRIDGE_KEY` — 폰과 서버가 공유하는 인증 키. 설정하면 이 키가 담긴
   `X-Bridge-Key` 헤더 없는 요청은 전부 403으로 거절합니다.
 - `OWNER_SETUP_CODE` — `/오너등록` 용 비밀 코드. 비워두거나 기본값이면
   오너 등록 자체가 잠깁니다.
+- `DISCORD_BOT_TOKEN` — Discord Developer Portal에서 발급받은 봇 토큰.
+- `DISCORD_GUILD_ID` — 테스트 서버 ID. 설정하면 명령어가 해당 서버에 바로
+  동기화됩니다. 비워두면 전역 명령어로 등록되어 반영까지 시간이 걸릴 수 있습니다.
+- `DISCORD_ENABLE_PREFIX` — `true`로 켜면 일반 메시지 `/공지` 같은 접두사
+  명령어도 처리합니다. Discord의 Message Content Intent가 필요합니다.
 
 ## 운영하면서 겪은 것들
 

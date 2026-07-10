@@ -5,6 +5,9 @@ APP_DIR="${APP_DIR:-/opt/kakaopogo}"
 APP_USER="${APP_USER:-ubuntu}"
 OWNER_SETUP_CODE="${OWNER_SETUP_CODE:-change-me}"
 BRIDGE_KEY="${BRIDGE_KEY:-}"
+DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-}"
+DISCORD_GUILD_ID="${DISCORD_GUILD_ID:-}"
+DISCORD_ENABLE_PREFIX="${DISCORD_ENABLE_PREFIX:-false}"
 
 if [[ ! -d "$APP_DIR" ]]; then
   echo "App directory not found: $APP_DIR"
@@ -29,12 +32,38 @@ sudo sed -i "s|^Environment=OWNER_SETUP_CODE=.*|Environment=OWNER_SETUP_CODE=${O
 sudo sed -i "s|^Environment=BRIDGE_KEY=.*|Environment=BRIDGE_KEY=${BRIDGE_KEY}|" /etc/systemd/system/kakaopogo.service
 sudo sed -i "s|^ExecStart=.*|ExecStart=${APP_DIR}/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000|" /etc/systemd/system/kakaopogo.service
 
+sudo install -m 0644 deploy/kakaopogo-discord.service /etc/systemd/system/kakaopogo-discord.service
+sudo sed -i "s/^User=.*/User=${APP_USER}/" /etc/systemd/system/kakaopogo-discord.service
+sudo sed -i "s/^Group=.*/Group=${APP_USER}/" /etc/systemd/system/kakaopogo-discord.service
+sudo sed -i "s|^WorkingDirectory=.*|WorkingDirectory=${APP_DIR}|" /etc/systemd/system/kakaopogo-discord.service
+sudo sed -i "s|^Environment=OWNER_SETUP_CODE=.*|Environment=OWNER_SETUP_CODE=${OWNER_SETUP_CODE}|" /etc/systemd/system/kakaopogo-discord.service
+sudo sed -i "s|^Environment=DISCORD_BOT_TOKEN=.*|Environment=DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}|" /etc/systemd/system/kakaopogo-discord.service
+sudo sed -i "s|^Environment=DISCORD_GUILD_ID=.*|Environment=DISCORD_GUILD_ID=${DISCORD_GUILD_ID}|" /etc/systemd/system/kakaopogo-discord.service
+sudo sed -i "s|^Environment=DISCORD_ENABLE_PREFIX=.*|Environment=DISCORD_ENABLE_PREFIX=${DISCORD_ENABLE_PREFIX}|" /etc/systemd/system/kakaopogo-discord.service
+sudo sed -i "s|^ExecStart=.*|ExecStart=${APP_DIR}/.venv/bin/python -m app.discord_bot|" /etc/systemd/system/kakaopogo-discord.service
+
 sudo systemctl daemon-reload
 sudo systemctl enable kakaopogo
 sudo systemctl restart kakaopogo
+
+if [[ -n "$DISCORD_BOT_TOKEN" ]]; then
+  sudo systemctl enable kakaopogo-discord
+  sudo systemctl restart kakaopogo-discord
+else
+  sudo systemctl disable kakaopogo-discord >/dev/null 2>&1 || true
+fi
 
 echo "KakaoPoGo service status:"
 sudo systemctl --no-pager --full status kakaopogo || true
 echo
 echo "Local health check:"
 curl -fsS http://127.0.0.1:8000/health && echo
+
+if [[ -n "$DISCORD_BOT_TOKEN" ]]; then
+  echo
+  echo "KakaoPoGo Discord service status:"
+  sudo systemctl --no-pager --full status kakaopogo-discord || true
+else
+  echo
+  echo "Discord bot service installed but not enabled because DISCORD_BOT_TOKEN is empty."
+fi

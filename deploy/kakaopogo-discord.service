@@ -1,0 +1,20 @@
+[Unit]
+Description=KakaoPoGo Discord bot
+After=network-online.target kakaopogo.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/kakaopogo
+Environment=OWNER_SETUP_CODE=change-me
+Environment=DISCORD_BOT_TOKEN=
+Environment=DISCORD_GUILD_ID=
+Environment=DISCORD_ENABLE_PREFIX=false
+ExecStart=/opt/kakaopogo/.venv/bin/python -m app.discord_bot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

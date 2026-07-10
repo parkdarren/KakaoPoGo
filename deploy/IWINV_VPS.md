@@ -110,7 +110,55 @@ sudo systemctl restart kakaopogo
 sudo journalctl -u kakaopogo -f
 ```
 
-## 7. Backup
+## 7. Optional Discord Bot
+
+Create an application and bot in the Discord Developer Portal, copy the bot
+token, then install the Discord service on the same VPS:
+
+```bash
+cd /opt/kakaopogo
+APP_USER=USERNAME \
+OWNER_SETUP_CODE=YOUR_PRIVATE_OWNER_CODE \
+DISCORD_BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN \
+DISCORD_GUILD_ID=YOUR_TEST_SERVER_ID \
+./deploy/vps_setup.sh
+```
+
+`DISCORD_GUILD_ID` is optional, but useful while testing because guild commands
+sync much faster than global commands.
+
+Invite the bot with these scopes:
+
+```text
+bot
+applications.commands
+```
+
+Recommended bot permissions:
+
+```text
+Send Messages
+Use Slash Commands
+Read Message History
+```
+
+Useful commands:
+
+```bash
+sudo systemctl status kakaopogo-discord
+sudo systemctl restart kakaopogo-discord
+sudo journalctl -u kakaopogo-discord -f
+```
+
+If you want free-form text commands such as `/공지` to work in addition to
+Discord slash commands, enable Message Content Intent in the Discord Developer
+Portal and set:
+
+```bash
+DISCORD_ENABLE_PREFIX=true
+```
+
+## 8. Backup
 
 The bot stores owner/admin/custom-command data in:
 
