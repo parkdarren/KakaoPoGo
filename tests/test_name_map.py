@@ -47,6 +47,14 @@ def test_korean_form_resolution() -> None:
     assert moltres.name == "Moltres"
     assert moltres.form == "Galarian"
 
+    primal_kyogre = resolver.resolve_query("원시가이오가")
+    assert primal_kyogre.name == "Kyogre"
+    assert primal_kyogre.form == "Primal"
+
+    prefixed_primal_groudon = resolver.resolve_query("primal groudon")
+    assert prefixed_primal_groudon.name == "Groudon"
+    assert prefixed_primal_groudon.form == "Primal"
+
 
 def test_dialga_short_aliases() -> None:
     resolver = NameResolver()

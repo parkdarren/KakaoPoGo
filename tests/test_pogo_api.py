@@ -31,6 +31,20 @@ MEGA_FIXTURES = {
             "stats": {"base_attack": 319, "base_defense": 212, "base_stamina": 186},
             "type": ["Fire", "Flying"],
         },
+        {
+            "mega_name": "Primal Kyogre",
+            "pokemon_id": 382,
+            "pokemon_name": "Kyogre",
+            "stats": {"base_attack": 353, "base_defense": 268, "base_stamina": 218},
+            "type": ["Water"],
+        },
+        {
+            "mega_name": "Primal Groudon",
+            "pokemon_id": 383,
+            "pokemon_name": "Groudon",
+            "stats": {"base_attack": 353, "base_defense": 268, "base_stamina": 218},
+            "type": ["Ground", "Fire"],
+        },
     ],
     "current_pokemon_moves.json": [
         {
@@ -40,7 +54,23 @@ MEGA_FIXTURES = {
             "charged_moves": ["Blast Burn"],
             "elite_fast_moves": [],
             "elite_charged_moves": [],
-        }
+        },
+        {
+            "pokemon_name": "Kyogre",
+            "form": "Normal",
+            "fast_moves": ["Waterfall"],
+            "charged_moves": ["Surf"],
+            "elite_fast_moves": [],
+            "elite_charged_moves": ["Origin Pulse"],
+        },
+        {
+            "pokemon_name": "Groudon",
+            "form": "Normal",
+            "fast_moves": ["Mud Shot"],
+            "charged_moves": ["Earthquake"],
+            "elite_fast_moves": [],
+            "elite_charged_moves": ["Precipice Blades"],
+        },
     ],
     "type_effectiveness.json": {},
     "weather_boosts.json": {},
@@ -67,6 +97,33 @@ async def test_mega_dex_entry_uses_mega_stats_and_types(tmp_path, monkeypatch) -
 
     with pytest.raises(MegaUnavailableError):
         await client.get_dex_entry("메가뮤츠")
+
+
+@pytest.mark.anyio
+async def test_primal_dex_entry_uses_primal_stats_and_types(
+    tmp_path, monkeypatch
+) -> None:
+    client = PogoApiClient(cache_dir=tmp_path)
+
+    async def fake_fetch(endpoint: str):
+        return MEGA_FIXTURES[endpoint]
+
+    monkeypatch.setattr(client, "_fetch_json", fake_fetch)
+
+    primal_groudon = await client.get_dex_entry("원시그란돈")
+    assert primal_groudon.form == "Primal"
+    assert primal_groudon.types == ["Ground", "Fire"]
+    assert primal_groudon.base_attack == 353
+    assert primal_groudon.fast_moves == ["Mud Shot"]
+    assert primal_groudon.elite_charged_moves == ["Precipice Blades"]
+
+    primal_kyogre = await client.get_dex_entry("primal kyogre")
+    assert primal_kyogre.form == "Primal"
+    assert primal_kyogre.types == ["Water"]
+    assert primal_kyogre.elite_charged_moves == ["Origin Pulse"]
+
+    with pytest.raises(MegaUnavailableError):
+        await client.get_dex_entry("메가그란돈")
 
 
 @pytest.mark.anyio

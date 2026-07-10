@@ -22,6 +22,7 @@ FORM_ALIASES = {
     "White": ["화이트", "백", "white"],
     "Altered": ["어나더", "어나더폼", "altered"],
     "Origin": ["오리진", "오리진폼", "origin"],
+    "Primal": ["원시", "원시회귀", "원시폼", "primal"],
     "Dawn_wings": ["새벽의날개", "새벽의 날개", "dawnwings", "dawn wings"],
     "Dusk_mane": ["황혼의갈기", "황혼의 갈기", "duskmane", "dusk mane"],
     "Ice_rider": ["백마", "백마 탄 모습", "아이스라이더", "ice rider"],

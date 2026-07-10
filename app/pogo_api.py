@@ -69,7 +69,7 @@ class PogoApiClient:
 
     async def get_dex_entry(self, query: str) -> PokemonDexEntry:
         resolved = self.name_resolver.resolve_query(query)
-        if resolved.mega:
+        if resolved.mega or resolved.form == "Primal":
             return await self._get_mega_entry(resolved)
         stats = await self._find_by_name(
             "pokemon_stats.json",
@@ -137,6 +137,23 @@ class PogoApiClient:
         if not matches:
             raise MegaUnavailableError(f"Mega Pokemon not found: {resolved.name}")
 
+        if resolved.form == "Primal":
+            matches = [
+                item
+                for item in matches
+                if item["mega_name"].lower().startswith("primal ")
+            ]
+            if not matches:
+                raise MegaUnavailableError(f"Primal Pokemon not found: {resolved.name}")
+        else:
+            matches = [
+                item
+                for item in matches
+                if item["mega_name"].lower().startswith("mega ")
+            ]
+            if not matches:
+                raise MegaUnavailableError(f"Mega Pokemon not found: {resolved.name}")
+
         if resolved.mega_variant:
             variant_suffix = f" {resolved.mega_variant.lower()}"
             matches = [
@@ -196,6 +213,8 @@ class PogoApiClient:
 
     @staticmethod
     def _mega_form(mega_name: str, pokemon_name: str) -> str:
+        if mega_name.lower().startswith("primal "):
+            return "Primal"
         variant = mega_name.replace("Mega", "").replace(pokemon_name, "").strip()
         return f"Mega_{variant.upper()}" if variant else "Mega"
 

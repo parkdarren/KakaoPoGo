@@ -50,6 +50,7 @@ FORM_KO = {
     "White": "화이트",
     "Altered": "어나더",
     "Origin": "오리진",
+    "Primal": "원시",
     "Dawn_wings": "새벽의날개",
     "Dusk_mane": "황혼의갈기",
     "Ice_rider": "백마",
