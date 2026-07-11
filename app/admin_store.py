@@ -253,6 +253,21 @@ class AdminStore:
             )
             return total_days, points, True
 
+    def get_room_control_target(self, control_room: str) -> str | None:
+        """이 방에 설정된 방 단위 관리 대상(가장 최근 설정)을 돌려준다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT target_room
+                FROM control_room_targets
+                WHERE control_room = ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (control_room,),
+            ).fetchone()
+        return row["target_room"] if row else None
+
     def attendance_ranking(
         self,
         room: str,

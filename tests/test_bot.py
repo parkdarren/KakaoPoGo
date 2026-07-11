@@ -759,6 +759,57 @@ async def test_owner_adds_and_removes_admin_by_nickname(tmp_path) -> None:
 
 
 @pytest.mark.anyio
+async def test_shared_admin_room_manages_target_room(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
+
+    # 오너 등록 후 종합방에 관리자(부방장)를 추가하고 hash로 승격시킨다.
+    await bot.handle("/오너등록 test-setup-code", room="개인방", sender="오너", user_key="hash:owner")
+    await bot.handle("/대상방설정 종합방", room="개인방", sender="오너", user_key="hash:owner")
+    await bot.handle("/관리자추가 부방장", room="개인방", sender="오너", user_key="hash:owner")
+    await bot.handle(
+        "/명령어등록 공지 승격용",
+        room="종합방",
+        sender="부방장",
+        user_key="hash:sub",
+    )
+    assert ("부방장", "admin", "hash:sub") in store.list_admin_records("종합방")
+
+    # 오너가 관리방에 방 단위 대상을 한 번 설정한다.
+    linked = await bot.handle(
+        "/대상방설정 종합방",
+        room="관리방",
+        sender="오너",
+        user_key="hash:owner",
+    )
+    assert "종합방" in linked.reply
+
+    # 부방장은 개인 대상방 설정 없이도 관리방에서 종합방을 관리할 수 있다.
+    shown = await bot.handle("/대상방확인", room="관리방", sender="부방장", user_key="hash:sub")
+    assert shown.reply == "현재 대상방: 종합방"
+
+    saved = await bot.handle(
+        "/명령어등록 공지 오늘 레이드 9시",
+        room="관리방",
+        sender="부방장",
+        user_key="hash:sub",
+    )
+    assert saved.reply == "/공지 명령어를 저장했습니다."
+
+    public_reply = await bot.handle("/공지", room="종합방", sender="일반")
+    assert public_reply.reply == "오늘 레이드 9시"
+
+    # 관리방에 흘러들어온 일반 유저는 여전히 거절된다.
+    denied = await bot.handle(
+        "/명령어등록 공지 해킹시도",
+        room="관리방",
+        sender="일반인",
+        user_key="hash:nobody",
+    )
+    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+
+
+@pytest.mark.anyio
 async def test_admin_can_manage_target_room_from_control_room(tmp_path) -> None:
     bot = PokemonGoBot(
         admin_store=AdminStore(tmp_path / "test.sqlite3"),

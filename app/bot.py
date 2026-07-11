@@ -429,15 +429,30 @@ class PokemonGoBot:
             if target_room:
                 self.admin_store.set_control_target(user.room, user.user_key, target_room)
         if not target_room:
+            # 개인 설정이 없으면 이 방에 설정된 방 단위 대상을 따른다.
+            # 관리방 하나를 만들어 두면 구성원 전원이 같은 대상방을 관리한다.
+            target_room = self.admin_store.get_room_control_target(user.room)
+        if not target_room:
             return user
         return ChatUser(room=target_room, sender=user.sender, user_key=user.user_key)
+
+    def _can_manage_room(self, user: ChatUser, target_room: str) -> bool:
+        # 명령을 친 방 기준 권한 또는 관리 대상방 기준 권한 중 하나면 충분하다.
+        # 종합방 admin이 조용한 관리방에서 명령을 칠 수 있게 하기 위함이다.
+        if self.admin_store.is_admin_or_owner(user):
+            return True
+        if target_room != user.room:
+            return self.admin_store.is_admin_or_owner(
+                ChatUser(room=target_room, sender=user.sender, user_key=user.user_key)
+            )
+        return False
 
     def _handle_target_set(self, user: ChatUser, target_room: str) -> str:
         clean_target = target_room.strip()
         if not clean_target:
             return "대상 공개방 이름을 입력해 주세요. 예: /대상방설정 포켓몬고 레이드방"
 
-        if not self.admin_store.is_admin_or_owner(user):
+        if not self._can_manage_room(user, clean_target):
             return "owner 또는 admin만 대상방을 설정할 수 있습니다."
 
         self.admin_store.set_control_target(
@@ -449,6 +464,8 @@ class PokemonGoBot:
 
     def _handle_target_show(self, user: ChatUser) -> str:
         target_room = self.admin_store.get_control_target(user.room, user.user_key)
+        if not target_room:
+            target_room = self.admin_store.get_room_control_target(user.room)
         if not target_room:
             return "설정된 대상방이 없습니다."
         return f"현재 대상방: {target_room}"
@@ -650,7 +667,7 @@ class PokemonGoBot:
         return f"{display_name} 님의 admin 권한을 삭제했습니다."
 
     def _handle_custom_upsert(self, user: ChatUser, target_room: str, query: str) -> str:
-        if not self.admin_store.is_admin_or_owner(user):
+        if not self._can_manage_room(user, target_room):
             return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
         parsed = self._parse_custom_upsert(query)
@@ -667,7 +684,7 @@ class PokemonGoBot:
         return f"/{command} 명령어를 저장했습니다."
 
     def _handle_custom_delete(self, user: ChatUser, target_room: str, query: str) -> str:
-        if not self.admin_store.is_admin_or_owner(user):
+        if not self._can_manage_room(user, target_room):
             return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
         command = self._normalize_custom_command(query)
