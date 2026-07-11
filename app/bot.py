@@ -128,6 +128,10 @@ OWNER_COMMANDS = [
 @dataclass(frozen=True)
 class BotResponse:
     reply: str
+    # 미등록 명령어처럼 방에 아무 답도 하지 않아야 할 때 True.
+    # 오픈채팅에는 다른 봇의 /명령어도 흘러들어오므로 모르는 명령어에
+    # 일일이 대꾸하면 방을 어지럽힌다.
+    silent: bool = False
 
 
 def parse_command(text: str) -> tuple[str, str] | None:
@@ -238,7 +242,7 @@ class PokemonGoBot:
     ) -> BotResponse:
         parsed = parse_command(text)
         if parsed is None:
-            return BotResponse("알 수 없는 명령어입니다. /도움말 을 입력해 주세요.")
+            return BotResponse("", silent=True)
 
         command, query = parsed
         user = self._chat_user(room, sender, user_key)
@@ -306,7 +310,8 @@ class PokemonGoBot:
             )
             if custom:
                 return BotResponse(custom.response)
-            return BotResponse("알 수 없는 명령어입니다. /도움말 을 입력해 주세요.")
+            # 이 방에 등록되지 않은 명령어는 다른 봇의 것일 수 있으니 침묵한다.
+            return BotResponse("", silent=True)
 
         if command == "dex":
             if not query:

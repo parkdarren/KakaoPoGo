@@ -68,6 +68,27 @@ async def test_exclamation_command_returns_silent_response() -> None:
     assert response == {"reply": "", "silent": True}
 
 
+@pytest.mark.anyio
+async def test_unknown_slash_command_stays_silent(tmp_path) -> None:
+    # 다른 봇의 명령어(/레이드신청 등)에 끼어들어 방을 어지럽히면 안 된다.
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+
+    for text in ("/레이드신청", "/좌표", "/뉴비초대 3명이요", "/"):
+        response = await bot.handle(text, room="레이드방", sender="일반")
+        assert response.silent is True, text
+        assert response.reply == ""
+
+
+@pytest.mark.anyio
+async def test_unknown_slash_command_returns_silent_http_response() -> None:
+    response = await command_get("/레이드신청", room="레이드방", sender="일반")
+
+    assert response == {"reply": "", "silent": True}
+
+
 def test_command_requires_bridge_key_when_configured(monkeypatch) -> None:
     monkeypatch.setenv("BRIDGE_KEY", "bridge-secret")
     client = TestClient(app)
@@ -522,7 +543,8 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
     assert deleted.reply == "/공지 명령어를 삭제했습니다."
 
     missing = await bot.handle("/공지", room="레이드방", sender="일반")
-    assert missing.reply == "알 수 없는 명령어입니다. /도움말 을 입력해 주세요."
+    assert missing.silent is True
+    assert missing.reply == ""
 
 
 @pytest.mark.anyio

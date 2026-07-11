@@ -71,7 +71,9 @@ async def _run_core_command(interaction: discord.Interaction, command_text: str)
         sender=_display_name(interaction.user),
         user_key=_user_key(interaction.user),
     )
-    await _send_interaction_reply(interaction, response.reply)
+    # 슬래시 명령은 응답이 필수라 침묵 대신 안내를 보낸다.
+    reply = response.reply if not response.silent else "등록되지 않은 명령어입니다."
+    await _send_interaction_reply(interaction, reply)
 
 
 @client.event
@@ -109,6 +111,8 @@ async def on_message(message: discord.Message) -> None:
         sender=_display_name(message.author),
         user_key=_user_key(message.author),
     )
+    if response.silent:
+        return
     for chunk in split_discord_messages(response.reply):
         await message.channel.send(chunk)
 

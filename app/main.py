@@ -223,6 +223,8 @@ async def command(request: CommandRequest) -> dict[str, Any]:
         sender=request.sender,
         user_key=request.user_key,
     )
+    if response.silent:
+        return _silent_response()
     return _reply_response(response.reply)
 
 
@@ -237,6 +239,8 @@ async def command_get(
         return _silent_response()
 
     response = await bot.handle(text, room=room, sender=sender, user_key=user_key)
+    if response.silent:
+        return _silent_response()
     return _reply_response(response.reply)
 
 
