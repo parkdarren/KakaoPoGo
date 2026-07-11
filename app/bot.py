@@ -113,6 +113,7 @@ ADMIN_COMMANDS = [
     "/명령어등록 공지 내용",
     "/명령어추가 공지 내용",
     "/명령어수정 공지 새내용",
+    "/명령어이어쓰기 공지 추가내용",
     "/명령어삭제 공지",
 ]
 OWNER_COMMANDS = [
@@ -190,6 +191,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "target_show", query
     if command in ("명령어등록", "명령어추가", "명령어수정"):
         return "custom_upsert", query
+    if command in ("명령어이어쓰기", "명령어이어붙이기"):
+        return "custom_append", query
     if command in ("명령어삭제",):
         return "custom_delete", query
     if command in ("명령어목록",):
@@ -302,6 +305,9 @@ class PokemonGoBot:
 
         if command == "custom_upsert":
             return BotResponse(self._handle_custom_upsert(user, target_user.room, query))
+
+        if command == "custom_append":
+            return BotResponse(self._handle_custom_append(user, target_user.room, query))
 
         if command == "custom_delete":
             return BotResponse(self._handle_custom_delete(user, target_user.room, query))
@@ -683,6 +689,28 @@ class PokemonGoBot:
         )
         return f"/{command} 명령어를 저장했습니다."
 
+    def _handle_custom_append(self, user: ChatUser, target_room: str, query: str) -> str:
+        if not self._can_manage_room(user, target_room):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+
+        parsed = self._parse_custom_upsert(query)
+        if parsed is None:
+            return "형식은 이렇게 입력해 주세요. 예: /명령어이어쓰기 공지 추가할 내용"
+
+        command, extra = parsed
+        custom = self.admin_store.get_custom_command(target_room, command)
+        if custom is None:
+            return f"/{command} 명령어가 없습니다. 먼저 /명령어등록 으로 만들어 주세요."
+
+        combined = f"{custom.response}\n{extra}"
+        self.admin_store.upsert_custom_command(
+            target_room,
+            command,
+            combined,
+            user.sender,
+        )
+        return f"/{command} 명령어에 내용을 이어붙였습니다. (현재 {len(combined)}자)"
+
     def _handle_custom_delete(self, user: ChatUser, target_room: str, query: str) -> str:
         if not self._can_manage_room(user, target_room):
             return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
@@ -813,6 +841,8 @@ class PokemonGoBot:
             "명령어추가",
             "명령어등록",
             "명령어수정",
+            "명령어이어쓰기",
+            "명령어이어붙이기",
             "명령어삭제",
             "명령어목록",
             "help",

@@ -50,6 +50,7 @@ def test_parse_new_commands() -> None:
     assert parse_command("/관리자승인 1") == ("admin_approve", "1")
     assert parse_command("/명령어등록 공지 내용") == ("custom_upsert", "공지 내용")
     assert parse_command("/명령어추가 공지 내용") == ("custom_upsert", "공지 내용")
+    assert parse_command("/명령어이어쓰기 공지 추가내용") == ("custom_append", "공지 추가내용")
     assert parse_command("/공지") == ("custom_run", "공지")
     assert parse_command("/대상방설정 레이드방") == ("target_set", "레이드방")
     assert parse_command("/대상방확인") == ("target_show", "")
@@ -756,6 +757,41 @@ async def test_owner_adds_and_removes_admin_by_nickname(tmp_path) -> None:
         user_key="hash:owner",
     )
     assert blocked.reply == "owner는 관리자삭제로 삭제할 수 없습니다."
+
+
+@pytest.mark.anyio
+async def test_custom_append_extends_existing_command(tmp_path) -> None:
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="오너")
+
+    missing = await bot.handle(
+        "/명령어이어쓰기 공지 둘째 줄",
+        room="레이드방",
+        sender="오너",
+    )
+    assert "먼저 /명령어등록" in missing.reply
+
+    await bot.handle("/명령어등록 공지 첫째 줄", room="레이드방", sender="오너")
+    appended = await bot.handle(
+        "/명령어이어쓰기 공지 둘째 줄",
+        room="레이드방",
+        sender="오너",
+    )
+    assert "이어붙였습니다" in appended.reply
+
+    await bot.handle("/명령어이어쓰기 공지 셋째 줄", room="레이드방", sender="오너")
+    reply = await bot.handle("/공지", room="레이드방", sender="일반")
+    assert reply.reply == "첫째 줄\n둘째 줄\n셋째 줄"
+
+    denied = await bot.handle(
+        "/명령어이어쓰기 공지 해킹",
+        room="레이드방",
+        sender="일반",
+    )
+    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
 
 @pytest.mark.anyio
