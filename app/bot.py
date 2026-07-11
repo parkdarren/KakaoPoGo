@@ -114,14 +114,15 @@ ADMIN_COMMANDS = [
     "/명령어추가 공지 내용",
     "/명령어수정 공지 새내용",
     "/명령어삭제 공지",
-]
-OWNER_COMMANDS = [
-    "/오너등록 코드",
+    "/관리자추가 닉네임",
+    "/관리자삭제 닉네임(또는 번호)",
+    "/관리자목록",
     "/관리자요청목록",
     "/관리자승인 번호",
     "/관리자거절 번호",
-    "/관리자삭제 번호",
-    "/관리자목록",
+]
+OWNER_COMMANDS = [
+    "/오너등록 코드",
 ]
 
 
@@ -179,6 +180,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "admin_reject", query
     if command in ("관리자목록",):
         return "admin_list", query
+    if command in ("관리자추가",):
+        return "admin_add", query
     if command in ("관리자삭제",):
         return "admin_remove", query
     if command in ("대상방설정",):
@@ -284,6 +287,9 @@ class PokemonGoBot:
 
         if command == "admin_list":
             return BotResponse(self._handle_admin_list(target_user))
+
+        if command == "admin_add":
+            return BotResponse(self._handle_admin_add(target_user, query))
 
         if command == "admin_remove":
             return BotResponse(self._handle_admin_remove(target_user, query))
@@ -531,8 +537,8 @@ class PokemonGoBot:
         )
 
     def _handle_admin_request_list(self, user: ChatUser) -> str:
-        if not self.admin_store.is_owner(user):
-            return "이 명령어는 owner만 사용할 수 있습니다."
+        if not self.admin_store.is_admin_or_owner(user):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
         requests = self.admin_store.list_pending_requests(user.room)
         if not requests:
@@ -546,8 +552,8 @@ class PokemonGoBot:
         return "\n".join(lines)
 
     def _handle_admin_approve(self, user: ChatUser, query: str) -> str:
-        if not self.admin_store.is_owner(user):
-            return "이 명령어는 owner만 사용할 수 있습니다."
+        if not self.admin_store.is_admin_or_owner(user):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
         request_id = self._parse_request_id(query)
         if request_id is None:
@@ -561,8 +567,8 @@ class PokemonGoBot:
         return f"{request.sender} 님을 admin으로 등록했습니다."
 
     def _handle_admin_reject(self, user: ChatUser, query: str) -> str:
-        if not self.admin_store.is_owner(user):
-            return "이 명령어는 owner만 사용할 수 있습니다."
+        if not self.admin_store.is_admin_or_owner(user):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
         request_id = self._parse_request_id(query)
         if request_id is None:
@@ -574,8 +580,8 @@ class PokemonGoBot:
         return f"{request.sender} 님의 관리자 요청을 거절했습니다."
 
     def _handle_admin_list(self, user: ChatUser) -> str:
-        if not self.admin_store.is_owner(user):
-            return "이 명령어는 owner만 사용할 수 있습니다."
+        if not self.admin_store.is_admin_or_owner(user):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
         admins = self.admin_store.list_admin_records(user.room)
         if not admins:
@@ -586,25 +592,61 @@ class PokemonGoBot:
             lines.append(f"{index}. {display_name}: {role}")
         return "\n".join(lines)
 
-    def _handle_admin_remove(self, user: ChatUser, query: str) -> str:
-        if not self.admin_store.is_owner(user):
-            return "이 명령어는 owner만 사용할 수 있습니다."
+    def _handle_admin_add(self, user: ChatUser, query: str) -> str:
+        if not self.admin_store.is_admin_or_owner(user):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
-        admin_index = self._parse_request_id(query)
-        if admin_index is None:
-            return "삭제할 관리자 번호를 입력해 주세요. 예: /관리자삭제 2"
+        nickname = query.strip()
+        if not nickname:
+            return "추가할 닉네임을 입력해 주세요. 예: /관리자추가 박화영"
+
+        for display_name, role, _user_key in self.admin_store.list_admin_records(user.room):
+            if display_name == nickname:
+                if role == "owner":
+                    return f"{nickname} 님은 이미 owner입니다."
+                return f"{nickname} 님은 이미 admin입니다."
+
+        # 닉네임만으로는 프로필 hash를 알 수 없으므로 우선 닉네임 키로
+        # 등록한다. 본인이 해당 방에서 처음 활동하면 hash 키로 자동 승격된다.
+        self.admin_store.add_admin(
+            ChatUser(
+                room=user.room,
+                sender=nickname,
+                user_key=f"sender:{nickname}",
+            )
+        )
+        return (
+            f"{nickname} 님을 admin으로 등록했습니다.\n"
+            f"'{user.room}' 방에서 {nickname} 닉네임으로 관리자 명령을 처음 사용하면"
+            " 프로필에 자동 연결됩니다."
+        )
+
+    def _handle_admin_remove(self, user: ChatUser, query: str) -> str:
+        if not self.admin_store.is_admin_or_owner(user):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+
+        token = query.strip()
+        if not token:
+            return "삭제할 관리자 닉네임이나 번호를 입력해 주세요. 예: /관리자삭제 박화영"
 
         admins = self.admin_store.list_admin_records(user.room)
-        if admin_index < 1 or admin_index > len(admins):
-            return "해당 관리자 번호를 찾지 못했습니다."
+        admin_index = self._parse_request_id(token)
+        if admin_index is not None:
+            if admin_index < 1 or admin_index > len(admins):
+                return "해당 관리자 번호를 찾지 못했습니다."
+            display_name, role, user_key = admins[admin_index - 1]
+        else:
+            matches = [record for record in admins if record[0] == token]
+            if not matches:
+                return f"'{token}' 닉네임의 관리자를 찾지 못했습니다."
+            display_name, role, user_key = matches[0]
 
-        display_name, role, user_key = admins[admin_index - 1]
         if role == "owner":
             return "owner는 관리자삭제로 삭제할 수 없습니다."
 
         removed = self.admin_store.remove_admin_by_key(user.room, user_key)
         if not removed:
-            return "해당 관리자 번호를 찾지 못했습니다."
+            return "해당 관리자를 찾지 못했습니다."
         return f"{display_name} 님의 admin 권한을 삭제했습니다."
 
     def _handle_custom_upsert(self, user: ChatUser, target_room: str, query: str) -> str:
@@ -746,6 +788,7 @@ class PokemonGoBot:
             "관리자승인",
             "관리자거절",
             "관리자목록",
+            "관리자추가",
             "관리자삭제",
             "대상방설정",
             "대상방확인",

@@ -449,7 +449,7 @@ async def test_owner_approves_admin_request(tmp_path) -> None:
         room="레이드방",
         sender="관리자후보",
     )
-    assert denied.reply == "이 명령어는 owner만 사용할 수 있습니다."
+    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
     pending = await bot.handle(
         "/관리자요청목록",
@@ -668,6 +668,77 @@ async def test_nickname_impersonation_of_hash_owner_is_denied(tmp_path) -> None:
 
     assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
     assert store.list_admin_records("레이드방") == [("오너", "owner", "hash:real-owner")]
+
+
+@pytest.mark.anyio
+async def test_owner_adds_and_removes_admin_by_nickname(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
+
+    # 개인방에서 오너 등록 후 공개방을 대상방으로 잡는다.
+    await bot.handle(
+        "/오너등록 test-setup-code",
+        room="개인방",
+        sender="오너",
+        user_key="hash:owner",
+    )
+    await bot.handle("/대상방설정 공개방", room="개인방", sender="오너", user_key="hash:owner")
+
+    added = await bot.handle(
+        "/관리자추가 박화영",
+        room="개인방",
+        sender="오너",
+        user_key="hash:owner",
+    )
+    assert "박화영 님을 admin으로 등록했습니다." in added.reply
+    assert ("박화영", "admin", "sender:박화영") in store.list_admin_records("공개방")
+
+    duplicate = await bot.handle(
+        "/관리자추가 박화영",
+        room="개인방",
+        sender="오너",
+        user_key="hash:owner",
+    )
+    assert duplicate.reply == "박화영 님은 이미 admin입니다."
+
+    # 박화영이 공개방에서 관리자 명령을 쓰면 hash 키로 자동 승격된다.
+    saved = await bot.handle(
+        "/명령어등록 공지 오늘 레이드 8시",
+        room="공개방",
+        sender="박화영",
+        user_key="hash:hwayoung",
+    )
+    assert saved.reply == "/공지 명령어를 저장했습니다."
+    assert ("박화영", "admin", "hash:hwayoung") in store.list_admin_records("공개방")
+
+    # 승격 후에는 admin도 오너와 같은 관리자 관리 권한을 가진다.
+    listed = await bot.handle(
+        "/관리자목록",
+        room="공개방",
+        sender="박화영",
+        user_key="hash:hwayoung",
+    )
+    assert "박화영: admin" in listed.reply
+
+    removed = await bot.handle(
+        "/관리자삭제 박화영",
+        room="개인방",
+        sender="오너",
+        user_key="hash:owner",
+    )
+    assert removed.reply == "박화영 님의 admin 권한을 삭제했습니다."
+    assert store.list_admin_records("공개방") == []
+
+    # owner 레코드가 있는 방(개인방 자신)에서는 닉네임으로도 owner를 못 지운다.
+    solo_bot_user_room = "개인방"
+    await bot.handle("/대상방설정 개인방", room=solo_bot_user_room, sender="오너", user_key="hash:owner")
+    blocked = await bot.handle(
+        "/관리자삭제 오너",
+        room=solo_bot_user_room,
+        sender="오너",
+        user_key="hash:owner",
+    )
+    assert blocked.reply == "owner는 관리자삭제로 삭제할 수 없습니다."
 
 
 @pytest.mark.anyio
