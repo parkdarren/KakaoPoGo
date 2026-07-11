@@ -559,6 +559,14 @@ class AdminStore:
                 ),
             )
 
+    def list_custom_rooms(self) -> list[str]:
+        """커스텀 명령어가 하나라도 등록된 방 이름 목록."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT room FROM custom_commands ORDER BY room"
+            ).fetchall()
+        return [row["room"] for row in rows]
+
     def delete_custom_command(self, room: str, command: str) -> bool:
         with self._connect() as conn:
             cursor = conn.execute(

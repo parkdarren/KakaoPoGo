@@ -109,6 +109,57 @@ def test_command_requires_bridge_key_when_configured(monkeypatch) -> None:
     assert allowed.json() == {"reply": "", "silent": True}
 
 
+def test_admin_web_saves_long_command(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    test_bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    monkeypatch.setattr(main_module, "bot", test_bot)
+    monkeypatch.setenv("BRIDGE_KEY", "admin-secret")
+    client = TestClient(main_module.app)
+    auth = {"X-Bridge-Key": "admin-secret"}
+
+    page = client.get("/admin")
+    assert page.status_code == 200
+    assert "명령어 관리" in page.text
+
+    long_text = "\n".join(f"{index}번째 줄 이벤트 안내" for index in range(120))
+    assert len(long_text) > 1000
+
+    denied = client.post(
+        "/admin/command",
+        json={"room": "종합방", "command": "이벤", "response": long_text},
+    )
+    assert denied.status_code == 403
+
+    saved = client.post(
+        "/admin/command",
+        headers=auth,
+        json={"room": "종합방", "command": "이벤", "response": long_text},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["length"] == len(long_text)
+
+    fetched = client.get(
+        "/admin/command",
+        headers=auth,
+        params={"room": "종합방", "command": "/이벤"},
+    )
+    assert fetched.json() == {"found": True, "command": "이벤", "response": long_text}
+
+    rooms = client.get("/admin/rooms", headers=auth)
+    assert rooms.json() == ["종합방"]
+
+    reserved = client.post(
+        "/admin/command",
+        headers=auth,
+        json={"room": "종합방", "command": "도감", "response": "x"},
+    )
+    assert reserved.status_code == 400
+
+
 def test_command_stays_open_without_bridge_key(monkeypatch) -> None:
     monkeypatch.delenv("BRIDGE_KEY", raising=False)
     client = TestClient(app)

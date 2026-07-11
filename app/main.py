@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from app.bot import PokemonGoBot, parse_command
@@ -270,6 +271,145 @@ async def kakao_skill(request: KakaoSkillRequest) -> dict[str, Any]:
         user_key=user_key,
     )
     return _kakao_simple_text_response(response.reply)
+
+
+class AdminCommandRequest(BaseModel):
+    room: str
+    command: str
+    response: str
+    sender: str = "웹관리"
+
+
+ADMIN_PAGE = """<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KakaoPoGo 명령어 관리</title>
+<style>
+  body { font-family: sans-serif; max-width: 560px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.2rem; }
+  label { display: block; margin-top: 12px; font-weight: bold; font-size: 0.9rem; }
+  input, textarea, select { width: 100%; box-sizing: border-box; padding: 8px;
+    margin-top: 4px; font-size: 1rem; border: 1px solid #bbb; border-radius: 6px; }
+  textarea { min-height: 260px; }
+  button { margin-top: 14px; padding: 10px 18px; font-size: 1rem; border: 0;
+    border-radius: 6px; background: #3c1e1e; color: #fee500; font-weight: bold; }
+  button.secondary { background: #eee; color: #333; margin-left: 8px; }
+  #status { margin-top: 12px; white-space: pre-wrap; font-size: 0.95rem; }
+  #count { font-weight: normal; color: #666; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<h1>🤖 KakaoPoGo 명령어 관리</h1>
+<p>카톡 알림 길이 제한 없이 긴 내용을 한 번에 등록/수정합니다.</p>
+
+<label>관리 키</label>
+<input id="key" type="password" placeholder="BRIDGE_KEY 값">
+
+<label>방 이름</label>
+<input id="room" list="rooms" placeholder="예: ✨포켓몬고 종합방🎉 ...">
+<datalist id="rooms"></datalist>
+
+<label>명령어 이름 (/ 없이)</label>
+<input id="command" placeholder="예: 이벤">
+
+<label>내용 <span id="count"></span></label>
+<textarea id="response" placeholder="명령어 응답 내용 전체를 붙여넣으세요"></textarea>
+
+<button onclick="save()">저장</button>
+<button class="secondary" onclick="load()">기존 내용 불러오기</button>
+<div id="status"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+$("key").value = localStorage.getItem("kpg-key") || "";
+$("room").value = localStorage.getItem("kpg-room") || "";
+$("response").addEventListener("input", () => {
+  $("count").textContent = "(" + $("response").value.length + "자)";
+});
+
+function headers() {
+  localStorage.setItem("kpg-key", $("key").value);
+  localStorage.setItem("kpg-room", $("room").value);
+  return { "X-Bridge-Key": $("key").value, "Content-Type": "application/json" };
+}
+
+async function refreshRooms() {
+  if (!$("key").value) return;
+  const res = await fetch("/admin/rooms", { headers: headers() });
+  if (!res.ok) return;
+  const rooms = await res.json();
+  $("rooms").innerHTML = rooms.map((r) => `<option value="${r}">`).join("");
+}
+$("key").addEventListener("change", refreshRooms);
+refreshRooms();
+
+async function load() {
+  const params = new URLSearchParams({ room: $("room").value, command: $("command").value });
+  const res = await fetch("/admin/command?" + params, { headers: headers() });
+  if (res.status === 403) return show("❌ 관리 키가 올바르지 않습니다.");
+  const data = await res.json();
+  if (!data.found) return show("등록되지 않은 명령어입니다. 저장하면 새로 만듭니다.");
+  $("response").value = data.response;
+  $("count").textContent = "(" + data.response.length + "자)";
+  show("✅ 불러왔습니다. 수정 후 저장하세요.");
+}
+
+async function save() {
+  const res = await fetch("/admin/command", {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      room: $("room").value,
+      command: $("command").value,
+      response: $("response").value,
+    }),
+  });
+  if (res.status === 403) return show("❌ 관리 키가 올바르지 않습니다.");
+  const data = await res.json();
+  if (!res.ok) return show("❌ " + (data.detail || "저장 실패"));
+  show(`✅ /${data.command} 저장 완료 (${data.length}자)`);
+  refreshRooms();
+}
+
+function show(msg) { $("status").textContent = msg; }
+</script>
+</body>
+</html>"""
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page() -> str:
+    return ADMIN_PAGE
+
+
+@app.get("/admin/rooms", dependencies=[Depends(_verify_bridge_key)])
+async def admin_rooms() -> list[str]:
+    return bot.admin_store.list_custom_rooms()
+
+
+@app.get("/admin/command", dependencies=[Depends(_verify_bridge_key)])
+async def admin_get_command(room: str, command: str) -> dict[str, Any]:
+    normalized = PokemonGoBot._normalize_custom_command(command)
+    custom = bot.admin_store.get_custom_command(room.strip(), normalized)
+    if custom is None:
+        return {"found": False}
+    return {"found": True, "command": normalized, "response": custom.response}
+
+
+@app.post("/admin/command", dependencies=[Depends(_verify_bridge_key)])
+async def admin_save_command(request: AdminCommandRequest) -> dict[str, Any]:
+    room = request.room.strip()
+    normalized = PokemonGoBot._normalize_custom_command(request.command)
+    response = request.response.strip()
+    if not room or not normalized or not response:
+        raise HTTPException(status_code=400, detail="방 이름, 명령어, 내용을 모두 입력해 주세요.")
+    if normalized in PokemonGoBot._reserved_custom_commands():
+        raise HTTPException(status_code=400, detail=f"'{normalized}'는 봇 기본 명령어라 사용할 수 없습니다.")
+
+    bot.admin_store.upsert_custom_command(room, normalized, response, request.sender)
+    return {"ok": True, "command": normalized, "length": len(response)}
 
 
 @app.get("/dex/{name}", dependencies=[Depends(_verify_bridge_key)])
