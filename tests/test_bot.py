@@ -449,7 +449,7 @@ async def test_owner_approves_admin_request(tmp_path) -> None:
         room="레이드방",
         sender="관리자후보",
     )
-    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+    assert denied.reply == "이 명령어는 owner만 사용할 수 있습니다."
 
     pending = await bot.handle(
         "/관리자요청목록",
@@ -711,12 +711,29 @@ async def test_owner_adds_and_removes_admin_by_nickname(tmp_path) -> None:
     assert saved.reply == "/공지 명령어를 저장했습니다."
     assert ("박화영", "admin", "hash:hwayoung") in store.list_admin_records("공개방")
 
-    # 승격 후에는 admin도 오너와 같은 관리자 관리 권한을 가진다.
-    listed = await bot.handle(
-        "/관리자목록",
+    # 관리자 관리 명령은 admin에게는 열리지 않는다 (오너 전용).
+    denied_list = await bot.handle(
+        "/관리자명단",
         room="공개방",
         sender="박화영",
         user_key="hash:hwayoung",
+    )
+    assert denied_list.reply == "이 명령어는 owner만 사용할 수 있습니다."
+
+    denied_add = await bot.handle(
+        "/관리자추가 다른사람",
+        room="공개방",
+        sender="박화영",
+        user_key="hash:hwayoung",
+    )
+    assert denied_add.reply == "이 명령어는 owner만 사용할 수 있습니다."
+
+    # 오너는 /관리자명단 별칭으로도 목록을 볼 수 있다.
+    listed = await bot.handle(
+        "/관리자명단",
+        room="개인방",
+        sender="오너",
+        user_key="hash:owner",
     )
     assert "박화영: admin" in listed.reply
 
