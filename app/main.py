@@ -323,6 +323,14 @@ ADMIN_PAGE = """<!doctype html>
 
 <script>
 const $ = (id) => document.getElementById(id);
+// 관리방에 공유하는 전용 링크(/admin#key=...)로 열면 키가 자동 입력된다.
+// 키를 페이지에 직접 심지 않는 이유: 링크 없이 주소만 아는 외부인에게
+// 봇 전체 제어 키가 노출되면 안 되기 때문.
+const hashKey = new URLSearchParams(location.hash.slice(1)).get("key");
+if (hashKey) {
+  localStorage.setItem("kpg-key", hashKey);
+  history.replaceState(null, "", location.pathname);
+}
 $("key").value = localStorage.getItem("kpg-key") || "";
 $("room").value = localStorage.getItem("kpg-room") || "";
 $("response").addEventListener("input", () => {
