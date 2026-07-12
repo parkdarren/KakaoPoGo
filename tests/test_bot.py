@@ -894,12 +894,20 @@ async def test_long_custom_reply_is_folded_behind_show_more(tmp_path) -> None:
     short = await bot.handle("/공지", room="레이드방", sender="일반")
     assert short.reply == short_body  # 짧은 응답은 그대로
 
-    long_body = "줄".join(str(i) for i in range(300))
+    long_body = "💜600명 이벤트\n" + "\n".join(f"{i}번째 줄" for i in range(100))
     bot.admin_store.upsert_custom_command("레이드방", "이벤", long_body, "오너")
     folded = await bot.handle("/이벤", room="레이드방", sender="일반")
-    assert folded.reply.startswith("💬 /이벤 (전체보기를 눌러주세요)")
-    assert FOLD_PADDING in folded.reply
-    assert folded.reply.endswith(long_body)
+    # 첫 줄이 미리보기가 되고, 그 뒤에 접힘 유도 패딩이 붙는다.
+    assert folded.reply.startswith("💜600명 이벤트" + FOLD_PADDING[:10])
+    assert folded.reply.endswith("99번째 줄")
+    # 패딩 말고는 내용이 달라지지 않는다.
+    assert folded.reply.replace(FOLD_PADDING, "") == long_body
+
+    # 줄바꿈이 없는 긴 한 줄짜리는 접지 않고 그대로 둔다.
+    one_line = "가" * 500
+    bot.admin_store.upsert_custom_command("레이드방", "한줄", one_line, "오너")
+    unfolded = await bot.handle("/한줄", room="레이드방", sender="일반")
+    assert unfolded.reply == one_line
 
 
 @pytest.mark.anyio

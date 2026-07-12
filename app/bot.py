@@ -32,10 +32,14 @@ FOLD_THRESHOLD = 400
 FOLD_PADDING = "​" * 500
 
 
-def fold_long_reply(title: str, content: str) -> str:
+def fold_long_reply(content: str) -> str:
+    """긴 내용의 첫 줄만 미리보기로 남기고 나머지를 전체보기 뒤로 접는다."""
     if len(content) <= FOLD_THRESHOLD:
         return content
-    return f"{title}{FOLD_PADDING}\n{content}"
+    first_line, separator, rest = content.partition("\n")
+    if not separator:
+        return content
+    return f"{first_line}{FOLD_PADDING}\n{rest}"
 DAILY_CHECK_IN_POINTS = 5
 DAILY_FORTUNES = [
     "오늘은 100% 개체값이 뜰 운세!",
@@ -333,12 +337,7 @@ class PokemonGoBot:
                 self._normalize_custom_command(query),
             )
             if custom:
-                return BotResponse(
-                    fold_long_reply(
-                        f"💬 /{custom.display_command} (전체보기를 눌러주세요)",
-                        custom.response,
-                    )
-                )
+                return BotResponse(fold_long_reply(custom.response))
             # 이 방에 등록되지 않은 명령어는 다른 봇의 것일 수 있으니 침묵한다.
             return BotResponse("", silent=True)
 
