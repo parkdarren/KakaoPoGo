@@ -27,10 +27,10 @@ DATA_UNAVAILABLE_MESSAGE = (
 # 이 길이를 넘는 커스텀 명령어 응답은 카톡에서 제목만 보이고
 # 나머지는 '전체보기' 뒤로 접히게 만든다.
 FOLD_THRESHOLD = 400
-# 긴 메시지를 전체보기로 접는 카톡의 길이 기준을 확실히 넘기기 위한 패딩.
+# 긴 메시지를 전체보기로 접는 카톡의 길이 기준을 넘기기 위한 패딩.
 # 폭 없는 공백(U+200B)을 첫 줄 뒤에 채워 넣으면 미리보기에는 첫 줄만 남는다.
-# 카톡 버전에 따라 세는 방식이 달라서 넉넉하게 넣는다.
-FOLD_PADDING = "​" * 2000
+# 실측: 500자는 폰 전송과 접힘 모두 동작, 2000자는 폰이 전송하지 못한다.
+FOLD_PADDING = "​" * 500
 
 
 def fold_long_reply(content: str) -> str:
@@ -343,9 +343,7 @@ class PokemonGoBot:
                 self._normalize_custom_command(query),
             )
             if custom:
-                # 접기(fold_long_reply)는 폰 전송 단계에서 실패하는 문제가
-                # 있어 /접기테스트 로 안전한 설정을 찾을 때까지 꺼둔다.
-                return BotResponse(custom.response)
+                return BotResponse(fold_long_reply(custom.response))
             # 이 방에 등록되지 않은 명령어는 다른 봇의 것일 수 있으니 침묵한다.
             return BotResponse("", silent=True)
 

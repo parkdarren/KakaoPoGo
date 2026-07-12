@@ -880,18 +880,27 @@ async def test_owner_adds_and_removes_admin_by_nickname(tmp_path) -> None:
 
 
 @pytest.mark.anyio
-async def test_custom_replies_are_sent_verbatim_and_fold_test_pads(tmp_path) -> None:
+async def test_long_custom_reply_is_folded_and_fold_test_pads(tmp_path) -> None:
+    from app.bot import FOLD_PADDING
+
     bot = PokemonGoBot(
         admin_store=AdminStore(tmp_path / "test.sqlite3"),
         owner_setup_code="test-setup-code",
     )
     await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="오너")
 
-    # 접기 기능이 전송 문제를 해결할 때까지 커스텀 응답은 원문 그대로 나간다.
+    short_body = "짧은 공지입니다."
+    await bot.handle(f"/명령어등록 공지 {short_body}", room="레이드방", sender="오너")
+    short = await bot.handle("/공지", room="레이드방", sender="일반")
+    assert short.reply == short_body  # 짧은 응답은 그대로
+
+    # 긴 응답은 첫 줄 뒤에 접힘 유도 패딩이 붙는다.
     long_body = "💜600명 이벤트\n" + "\n".join(f"{i}번째 줄" for i in range(100))
     bot.admin_store.upsert_custom_command("레이드방", "이벤", long_body, "오너")
-    reply = await bot.handle("/이벤", room="레이드방", sender="일반")
-    assert reply.reply == long_body
+    folded = await bot.handle("/이벤", room="레이드방", sender="일반")
+    assert folded.reply.startswith("💜600명 이벤트" + FOLD_PADDING[:10])
+    assert folded.reply.endswith("99번째 줄")
+    assert folded.reply.replace(FOLD_PADDING, "") == long_body
 
     # 접기 실험용 숨은 명령: 패딩 수를 조절할 수 있다.
     default_test = await bot.handle("/접기테스트", room="레이드방", sender="일반")
