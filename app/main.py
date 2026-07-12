@@ -312,8 +312,12 @@ ADMIN_PAGE = """<!doctype html>
 <label>관리 키</label>
 <input id="key" type="password" placeholder="BRIDGE_KEY 값">
 
-<label>방 이름</label>
-<input id="room" list="rooms" placeholder="예: ✨포켓몬고 종합방🎉 ...">
+<label>방 이름 (목록에서 선택하세요 — 직접 입력하면 보이지 않는 문자 차이로 다른 방이 될 수 있어요)</label>
+<select id="roomSelect">
+  <option value="">키를 입력하면 방 목록이 나옵니다</option>
+</select>
+<input id="room" placeholder="새 방 이름 (봇 로그와 정확히 같아야 함)"
+  style="display:none; margin-top:6px">
 <datalist id="rooms"></datalist>
 
 <label>명령어 이름 (/ 없이)</label>
@@ -349,14 +353,22 @@ if (hashKey) {
   history.replaceState(null, "", location.pathname);
 }
 $("key").value = localStorage.getItem("kpg-key") || "";
-$("room").value = localStorage.getItem("kpg-room") || "";
 $("response").addEventListener("input", () => {
   $("count").textContent = "(" + $("response").value.length + "자)";
 });
 
+function currentRoom() {
+  if ($("roomSelect").value === "__custom__") return $("room").value.trim();
+  return $("roomSelect").value;
+}
+
+$("roomSelect").addEventListener("change", () => {
+  $("room").style.display = $("roomSelect").value === "__custom__" ? "block" : "none";
+  localStorage.setItem("kpg-room", currentRoom());
+});
+
 function headers() {
   localStorage.setItem("kpg-key", $("key").value);
-  localStorage.setItem("kpg-room", $("room").value);
   return { "X-Bridge-Key": $("key").value, "Content-Type": "application/json" };
 }
 
@@ -365,13 +377,19 @@ async function refreshRooms() {
   const res = await fetch("/admin/rooms", { headers: headers() });
   if (!res.ok) return;
   const rooms = await res.json();
+  const saved = localStorage.getItem("kpg-room") || "";
+  $("roomSelect").innerHTML =
+    rooms.map((r) => `<option value="${r}">${r}</option>`).join("") +
+    `<option value="__custom__">＋ 새 방 이름 직접 입력</option>`;
+  if (rooms.includes(saved)) $("roomSelect").value = saved;
   $("rooms").innerHTML = rooms.map((r) => `<option value="${r}">`).join("");
 }
 $("key").addEventListener("change", refreshRooms);
 refreshRooms();
 
 async function load() {
-  const params = new URLSearchParams({ room: $("room").value, command: $("command").value });
+  if (!currentRoom()) return show("방을 먼저 선택해 주세요.");
+  const params = new URLSearchParams({ room: currentRoom(), command: $("command").value });
   const res = await fetch("/admin/command?" + params, { headers: headers() });
   if (res.status === 403) return show("❌ 관리 키가 올바르지 않습니다.");
   const data = await res.json();
@@ -382,11 +400,12 @@ async function load() {
 }
 
 async function save() {
+  if (!currentRoom()) return show("방을 먼저 선택해 주세요.");
   const res = await fetch("/admin/command", {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({
-      room: $("room").value,
+      room: currentRoom(),
       command: $("command").value,
       response: $("response").value,
     }),
