@@ -880,34 +880,28 @@ async def test_owner_adds_and_removes_admin_by_nickname(tmp_path) -> None:
 
 
 @pytest.mark.anyio
-async def test_long_custom_reply_is_folded_behind_show_more(tmp_path) -> None:
-    from app.bot import FOLD_PADDING
-
+async def test_custom_replies_are_sent_verbatim_and_fold_test_pads(tmp_path) -> None:
     bot = PokemonGoBot(
         admin_store=AdminStore(tmp_path / "test.sqlite3"),
         owner_setup_code="test-setup-code",
     )
     await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="오너")
 
-    short_body = "짧은 공지입니다."
-    await bot.handle(f"/명령어등록 공지 {short_body}", room="레이드방", sender="오너")
-    short = await bot.handle("/공지", room="레이드방", sender="일반")
-    assert short.reply == short_body  # 짧은 응답은 그대로
-
+    # 접기 기능이 전송 문제를 해결할 때까지 커스텀 응답은 원문 그대로 나간다.
     long_body = "💜600명 이벤트\n" + "\n".join(f"{i}번째 줄" for i in range(100))
     bot.admin_store.upsert_custom_command("레이드방", "이벤", long_body, "오너")
-    folded = await bot.handle("/이벤", room="레이드방", sender="일반")
-    # 첫 줄이 미리보기가 되고, 그 뒤에 접힘 유도 패딩이 붙는다.
-    assert folded.reply.startswith("💜600명 이벤트" + FOLD_PADDING[:10])
-    assert folded.reply.endswith("99번째 줄")
-    # 패딩 말고는 내용이 달라지지 않는다.
-    assert folded.reply.replace(FOLD_PADDING, "") == long_body
+    reply = await bot.handle("/이벤", room="레이드방", sender="일반")
+    assert reply.reply == long_body
 
-    # 줄바꿈이 없는 긴 한 줄짜리는 접지 않고 그대로 둔다.
-    one_line = "가" * 500
-    bot.admin_store.upsert_custom_command("레이드방", "한줄", one_line, "오너")
-    unfolded = await bot.handle("/한줄", room="레이드방", sender="일반")
-    assert unfolded.reply == one_line
+    # 접기 실험용 숨은 명령: 패딩 수를 조절할 수 있다.
+    default_test = await bot.handle("/접기테스트", room="레이드방", sender="일반")
+    assert default_test.reply.startswith("[접기테스트] 패딩 500자")
+    assert default_test.reply.count("​") == 500
+    assert default_test.reply.endswith("40번째 줄입니다.")
+
+    custom_count = await bot.handle("/접기테스트 1200", room="레이드방", sender="일반")
+    assert "패딩 1200자" in custom_count.reply
+    assert custom_count.reply.count("​") == 1200
 
 
 @pytest.mark.anyio

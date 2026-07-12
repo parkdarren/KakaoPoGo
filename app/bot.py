@@ -184,6 +184,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "daily", query
     if command in ("출석랭킹", "출첵랭킹"):
         return "attendance_ranking", query
+    if command in ("접기테스트",):
+        return "fold_test", query
     if command in ("오너등록", "owner"):
         return "owner_setup", query
     if command in ("관리자요청",):
@@ -279,6 +281,9 @@ class PokemonGoBot:
         if command == "attendance_ranking":
             return BotResponse(self._handle_attendance_ranking(user))
 
+        if command == "fold_test":
+            return BotResponse(self._handle_fold_test(query))
+
         if command == "events":
             try:
                 return BotResponse(await self.event_client.format_schedule(days=7))
@@ -338,7 +343,9 @@ class PokemonGoBot:
                 self._normalize_custom_command(query),
             )
             if custom:
-                return BotResponse(fold_long_reply(custom.response))
+                # 접기(fold_long_reply)는 폰 전송 단계에서 실패하는 문제가
+                # 있어 /접기테스트 로 안전한 설정을 찾을 때까지 꺼둔다.
+                return BotResponse(custom.response)
             # 이 방에 등록되지 않은 명령어는 다른 봇의 것일 수 있으니 침묵한다.
             return BotResponse("", silent=True)
 
@@ -545,6 +552,22 @@ class PokemonGoBot:
             lines.append(f"오늘은 이미 출석했어요. (누적 {total_days}일)")
         lines.append(f"보유 포인트: {points}P")
         return "\n".join(lines)
+
+    @staticmethod
+    def _handle_fold_test(query: str) -> str:
+        """접힘 유도 설정을 실험하는 숨은 명령. /접기테스트 [패딩수]"""
+        try:
+            padding_count = int(query.strip()) if query.strip() else 500
+        except ValueError:
+            padding_count = 500
+        padding_count = max(0, min(padding_count, 4000))
+        body = "\n".join(f"{index}번째 줄입니다." for index in range(1, 41))
+        return (
+            f"[접기테스트] 패딩 {padding_count}자 — 이 줄만 보이면 성공!"
+            + "​" * padding_count
+            + "\n"
+            + body
+        )
 
     def _handle_attendance_ranking(self, user: ChatUser) -> str:
         ranking = self.admin_store.attendance_ranking(user.room, limit=10)
@@ -841,6 +864,7 @@ class PokemonGoBot:
             "ㅊㅊ",
             "출석랭킹",
             "출첵랭킹",
+            "접기테스트",
             "오너등록",
             "owner",
             "관리자요청",
