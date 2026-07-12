@@ -280,6 +280,11 @@ class AdminCommandRequest(BaseModel):
     sender: str = "웹관리"
 
 
+class RenameRoomRequest(BaseModel):
+    old_room: str
+    new_room: str
+
+
 ADMIN_PAGE = """<!doctype html>
 <html lang="ko">
 <head>
@@ -320,6 +325,18 @@ ADMIN_PAGE = """<!doctype html>
 <button onclick="save()">저장</button>
 <button class="secondary" onclick="load()">기존 내용 불러오기</button>
 <div id="status"></div>
+
+<details style="margin-top:28px">
+<summary>🏷️ 방 이름 변경 이전 (방 제목이 바뀌었을 때만 사용)</summary>
+<p style="font-size:0.85rem;color:#666">카톡방 제목이 바뀌면 봇이 새로운 방으로
+인식해 명령어·관리자·출석이 끊깁니다. 옛 이름의 데이터를 새 이름으로 옮깁니다.</p>
+<label>옛 방 이름</label>
+<input id="oldRoom" list="rooms" placeholder="바뀌기 전 방 제목">
+<label>새 방 이름</label>
+<input id="newRoom" placeholder="바뀐 후 방 제목 (정확히)">
+<button onclick="renameRoom()">이전 실행</button>
+<div id="renameStatus"></div>
+</details>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -382,6 +399,25 @@ async function save() {
 }
 
 function show(msg) { $("status").textContent = msg; }
+
+async function renameRoom() {
+  const oldRoom = $("oldRoom").value.trim();
+  const newRoom = $("newRoom").value.trim();
+  const out = (msg) => { $("renameStatus").textContent = msg; };
+  if (!oldRoom || !newRoom) return out("옛 이름과 새 이름을 모두 입력해 주세요.");
+  if (oldRoom === newRoom) return out("두 이름이 같습니다.");
+  if (!confirm(`'${oldRoom}'\\n→ '${newRoom}'\\n\\n이 방의 명령어·관리자·출석 기록을 모두 옮길까요?`)) return;
+  const res = await fetch("/admin/rename-room", {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ old_room: oldRoom, new_room: newRoom }),
+  });
+  if (res.status === 403) return out("❌ 관리 키가 올바르지 않습니다.");
+  const data = await res.json();
+  if (!res.ok) return out("❌ " + (data.detail || "이전 실패"));
+  out(`✅ 이전 완료 — 명령어 ${data.custom_commands}개, 관리자 ${data.room_admins}명, 출석 ${data.attendance}건`);
+  refreshRooms();
+}
 </script>
 </body>
 </html>"""
@@ -418,6 +454,19 @@ async def admin_save_command(request: AdminCommandRequest) -> dict[str, Any]:
 
     bot.admin_store.upsert_custom_command(room, normalized, response, request.sender)
     return {"ok": True, "command": normalized, "length": len(response)}
+
+
+@app.post("/admin/rename-room", dependencies=[Depends(_verify_bridge_key)])
+async def admin_rename_room(request: RenameRoomRequest) -> dict[str, Any]:
+    old_room = request.old_room.strip()
+    new_room = request.new_room.strip()
+    if not old_room or not new_room:
+        raise HTTPException(status_code=400, detail="옛 이름과 새 이름을 모두 입력해 주세요.")
+    if old_room == new_room:
+        raise HTTPException(status_code=400, detail="두 이름이 같습니다.")
+
+    moved = bot.admin_store.migrate_room(old_room, new_room)
+    return {"ok": True, **moved}
 
 
 @app.get("/dex/{name}", dependencies=[Depends(_verify_bridge_key)])

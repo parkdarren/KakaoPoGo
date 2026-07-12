@@ -559,6 +559,93 @@ class AdminStore:
                 ),
             )
 
+    def migrate_room(self, old_room: str, new_room: str) -> dict[str, int]:
+        """방 제목이 바뀌었을 때 방 이름 기준으로 저장된 데이터를 새 이름으로 옮긴다.
+
+        새 이름 쪽에 이미 생긴 데이터와 겹치면 명령어/관리자는 새 이름 쪽을
+        남기고, 출석은 일수와 포인트를 합산한다.
+        """
+        moved: dict[str, int] = {}
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_key, display_name, last_check_in, total_days, points
+                FROM attendance WHERE room = ?
+                """,
+                (old_room,),
+            ).fetchall()
+            for row in rows:
+                existing = conn.execute(
+                    "SELECT total_days, points FROM attendance WHERE room = ? AND user_key = ?",
+                    (new_room, row["user_key"]),
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        """
+                        UPDATE attendance
+                        SET total_days = ?, points = ?,
+                            last_check_in = MAX(last_check_in, ?)
+                        WHERE room = ? AND user_key = ?
+                        """,
+                        (
+                            existing["total_days"] + row["total_days"],
+                            existing["points"] + row["points"],
+                            row["last_check_in"],
+                            new_room,
+                            row["user_key"],
+                        ),
+                    )
+                    conn.execute(
+                        "DELETE FROM attendance WHERE room = ? AND user_key = ?",
+                        (old_room, row["user_key"]),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE attendance SET room = ? WHERE room = ? AND user_key = ?",
+                        (new_room, old_room, row["user_key"]),
+                    )
+            moved["attendance"] = len(rows)
+
+            for table, key_col in (
+                ("custom_commands", "command"),
+                ("room_admins", "user_key"),
+            ):
+                conn.execute(
+                    f"""
+                    DELETE FROM {table}
+                    WHERE room = ? AND {key_col} IN (
+                        SELECT {key_col} FROM {table} WHERE room = ?
+                    )
+                    """,
+                    (old_room, new_room),
+                )
+                cursor = conn.execute(
+                    f"UPDATE {table} SET room = ? WHERE room = ?",
+                    (new_room, old_room),
+                )
+                moved[table] = cursor.rowcount
+
+            cursor = conn.execute(
+                "UPDATE control_room_targets SET target_room = ? WHERE target_room = ?",
+                (new_room, old_room),
+            )
+            moved["control_room_targets"] = cursor.rowcount
+            # 옛 방 자체가 관리방으로 쓰이던 경우도 함께 옮긴다.
+            conn.execute(
+                """
+                DELETE FROM control_room_targets
+                WHERE control_room = ? AND user_key IN (
+                    SELECT user_key FROM control_room_targets WHERE control_room = ?
+                )
+                """,
+                (old_room, new_room),
+            )
+            conn.execute(
+                "UPDATE control_room_targets SET control_room = ? WHERE control_room = ?",
+                (new_room, old_room),
+            )
+        return moved
+
     def list_custom_rooms(self) -> list[str]:
         """커스텀 명령어가 하나라도 등록된 방 이름 목록."""
         with self._connect() as conn:

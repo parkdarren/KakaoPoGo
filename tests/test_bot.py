@@ -160,6 +160,75 @@ def test_admin_web_saves_long_command(tmp_path, monkeypatch) -> None:
     assert reserved.status_code == 400
 
 
+def test_migrate_room_moves_and_merges_data(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    old, new = "옛방", "새방"
+
+    store.add_admin(ChatUser(room=old, sender="부방장", user_key="hash:sub"))
+    store.upsert_custom_command(old, "공지", "옛 공지", "오너")
+    store.upsert_custom_command(old, "규칙", "규칙 내용", "오너")
+    # 새 이름으로 이미 같은 명령어가 생긴 경우: 새 이름 쪽을 남긴다.
+    store.upsert_custom_command(new, "공지", "새 공지", "오너")
+    # 출석: 안 겹치는 사람은 이동, 겹치는 사람은 합산.
+    store.check_in(ChatUser(room=old, sender="지우", user_key="hash:ash"), "2026-07-10", 5)
+    store.check_in(ChatUser(room=old, sender="웅이", user_key="hash:brock"), "2026-07-10", 5)
+    store.check_in(ChatUser(room=new, sender="지우", user_key="hash:ash"), "2026-07-12", 5)
+
+    moved = store.migrate_room(old, new)
+
+    assert moved["custom_commands"] == 1  # '규칙'만 이동 ('공지'는 새쪽 유지)
+    assert moved["room_admins"] == 1
+    assert store.get_custom_command(new, "공지").response == "새 공지"
+    assert store.get_custom_command(new, "규칙").response == "규칙 내용"
+    assert store.get_custom_command(old, "규칙") is None
+    assert ("부방장", "admin", "hash:sub") in store.list_admin_records(new)
+
+    ranking = dict(
+        (name, (days, points)) for name, days, points in store.attendance_ranking(new)
+    )
+    assert ranking["지우"] == (2, 10)  # 옛방 1일 + 새방 1일 합산
+    assert ranking["웅이"] == (1, 5)
+    assert store.attendance_ranking(old) == []
+
+
+def test_admin_web_rename_room(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    test_bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    monkeypatch.setattr(main_module, "bot", test_bot)
+    monkeypatch.setenv("BRIDGE_KEY", "admin-secret")
+    client = TestClient(main_module.app)
+    auth = {"X-Bridge-Key": "admin-secret"}
+
+    test_bot.admin_store.upsert_custom_command("옛방", "공지", "내용", "오너")
+
+    denied = client.post(
+        "/admin/rename-room", json={"old_room": "옛방", "new_room": "새방"}
+    )
+    assert denied.status_code == 403
+
+    same = client.post(
+        "/admin/rename-room",
+        headers=auth,
+        json={"old_room": "옛방", "new_room": "옛방"},
+    )
+    assert same.status_code == 400
+
+    moved = client.post(
+        "/admin/rename-room",
+        headers=auth,
+        json={"old_room": "옛방", "new_room": "새방"},
+    )
+    assert moved.status_code == 200
+    assert moved.json()["custom_commands"] == 1
+    assert test_bot.admin_store.get_custom_command("새방", "공지").response == "내용"
+
+
 def test_command_stays_open_without_bridge_key(monkeypatch) -> None:
     monkeypatch.delenv("BRIDGE_KEY", raising=False)
     client = TestClient(app)
