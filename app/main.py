@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from app.bot import PokemonGoBot, parse_command
@@ -19,6 +20,25 @@ def _verify_bridge_key(x_bridge_key: str | None = Header(default=None)) -> None:
         return
     if x_bridge_key != bridge_key:
         raise HTTPException(status_code=403, detail="invalid bridge key")
+
+
+class AsciiJSONResponse(Response):
+    """비ASCII 문자를 \\uXXXX로 이스케이프해서 내려주는 JSON 응답.
+
+    폰 브리지가 응답을 Jsoup으로 읽는데, Jsoup의 텍스트 정리 과정이
+    폭 없는 공백(U+200B) 같은 보이지 않는 문자를 지워버린다. 이스케이프
+    형태로 보내면 폰의 JSON.parse 단계에서 온전히 복원된다.
+    """
+
+    media_type = "application/json"
+
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=True,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("ascii")
 
 
 app = FastAPI(title="KakaoPoGo Bot", version="0.1.0")
@@ -213,7 +233,11 @@ def _extract_kakao_room(request: KakaoSkillRequest) -> str:
     return f"kakao-channel:{room_key}"
 
 
-@app.post("/command", dependencies=[Depends(_verify_bridge_key)])
+@app.post(
+    "/command",
+    dependencies=[Depends(_verify_bridge_key)],
+    response_class=AsciiJSONResponse,
+)
 async def command(request: CommandRequest) -> dict[str, Any]:
     if _is_silent_message(request.text):
         return _silent_response()
@@ -229,7 +253,11 @@ async def command(request: CommandRequest) -> dict[str, Any]:
     return _reply_response(response.reply)
 
 
-@app.get("/command", dependencies=[Depends(_verify_bridge_key)])
+@app.get(
+    "/command",
+    dependencies=[Depends(_verify_bridge_key)],
+    response_class=AsciiJSONResponse,
+)
 async def command_get(
     text: str,
     room: str = "local",
