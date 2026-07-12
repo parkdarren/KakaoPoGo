@@ -880,6 +880,29 @@ async def test_owner_adds_and_removes_admin_by_nickname(tmp_path) -> None:
 
 
 @pytest.mark.anyio
+async def test_long_custom_reply_is_folded_behind_show_more(tmp_path) -> None:
+    from app.bot import FOLD_PADDING
+
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="오너")
+
+    short_body = "짧은 공지입니다."
+    await bot.handle(f"/명령어등록 공지 {short_body}", room="레이드방", sender="오너")
+    short = await bot.handle("/공지", room="레이드방", sender="일반")
+    assert short.reply == short_body  # 짧은 응답은 그대로
+
+    long_body = "줄".join(str(i) for i in range(300))
+    bot.admin_store.upsert_custom_command("레이드방", "이벤", long_body, "오너")
+    folded = await bot.handle("/이벤", room="레이드방", sender="일반")
+    assert folded.reply.startswith("💬 /이벤 (전체보기를 눌러주세요)")
+    assert FOLD_PADDING in folded.reply
+    assert folded.reply.endswith(long_body)
+
+
+@pytest.mark.anyio
 async def test_custom_append_extends_existing_command(tmp_path) -> None:
     bot = PokemonGoBot(
         admin_store=AdminStore(tmp_path / "test.sqlite3"),

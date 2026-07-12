@@ -24,6 +24,18 @@ from app.pogo_api import (
 DATA_UNAVAILABLE_MESSAGE = (
     "포켓몬 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
 )
+# 이 길이를 넘는 커스텀 명령어 응답은 카톡에서 제목만 보이고
+# 나머지는 '전체보기' 뒤로 접히게 만든다.
+FOLD_THRESHOLD = 400
+# 카톡은 대략 500자를 넘는 메시지를 전체보기로 접는다. 폭 없는 공백(U+200B)을
+# 제목 뒤에 채워 넣으면 미리보기에는 제목 한 줄만 남는다.
+FOLD_PADDING = "​" * 500
+
+
+def fold_long_reply(title: str, content: str) -> str:
+    if len(content) <= FOLD_THRESHOLD:
+        return content
+    return f"{title}{FOLD_PADDING}\n{content}"
 DAILY_CHECK_IN_POINTS = 5
 DAILY_FORTUNES = [
     "오늘은 100% 개체값이 뜰 운세!",
@@ -321,7 +333,12 @@ class PokemonGoBot:
                 self._normalize_custom_command(query),
             )
             if custom:
-                return BotResponse(custom.response)
+                return BotResponse(
+                    fold_long_reply(
+                        f"💬 /{custom.display_command} (전체보기를 눌러주세요)",
+                        custom.response,
+                    )
+                )
             # 이 방에 등록되지 않은 명령어는 다른 봇의 것일 수 있으니 침묵한다.
             return BotResponse("", silent=True)
 
