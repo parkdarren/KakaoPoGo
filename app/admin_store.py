@@ -492,19 +492,19 @@ class AdminStore:
             )
             return daily, total
 
-    def list_raid_cancel_stats(self, room: str) -> list[tuple[str, int]]:
-        """취소 기록이 있는 모든 사람을 (닉네임, 누적 횟수)로, 많은 순서대로."""
+    def list_raid_cancel_stats(self, room: str, today: str) -> list[tuple[str, int]]:
+        """오늘 취소한 모든 사람을 (닉네임, 오늘 횟수)로, 많은 순서대로."""
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT nickname, cancel_count
+                SELECT nickname, daily_count
                 FROM raid_cancel_stats
-                WHERE room = ?
-                ORDER BY cancel_count DESC, last_cancel_at DESC
+                WHERE room = ? AND last_cancel_date = ?
+                ORDER BY daily_count DESC, last_cancel_at DESC
                 """,
-                (room,),
+                (room, today),
             ).fetchall()
-        return [(row["nickname"], row["cancel_count"]) for row in rows]
+        return [(row["nickname"], row["daily_count"]) for row in rows]
 
     def list_raid_sessions(self, room: str) -> list[tuple[str, str, int]]:
         """(포켓몬 표시명, 모집자 표시명, 인원) 목록. 개설 순서대로."""

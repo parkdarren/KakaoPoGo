@@ -782,14 +782,14 @@ class PokemonGoBot:
         )
         if not removed:
             return f"'{nickname}' 님은 {pokemon_display}({host}) 명단에 없어요."
-        daily, _total = self.admin_store.record_raid_cancel(
+        daily, total = self.admin_store.record_raid_cancel(
             user.room, nickname, date.today().isoformat()
         )
         return (
             "✂️ 취소 완료\n"
             f"🎯 {pokemon_display} (모집: {host}) · 현재 {count}명\n"
             f"'{nickname}' 님을 명단에서 뺐어요.\n"
-            f"오늘 {daily}번째 취소예요."
+            f"취소 횟수 : 오늘 {daily}회 · 누적 {total}회"
         )
 
     def _handle_raid_list(self, user: ChatUser, query: str) -> str:
@@ -866,11 +866,13 @@ class PokemonGoBot:
         if not self.admin_store.is_admin_or_owner(user):
             return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
-        stats = self.admin_store.list_raid_cancel_stats(user.room)
+        stats = self.admin_store.list_raid_cancel_stats(
+            user.room, date.today().isoformat()
+        )
         if not stats:
-            return "이 방의 레이드 취소 기록이 아직 없어요."
+            return "오늘 레이드 취소 기록이 없어요."
 
-        lines = [f"✂️ 레이드 취소 이력 — 총 {len(stats)}명", "━━━━━━━━━━━━━━"]
+        lines = [f"✂️ 오늘의 레이드 취소 — 총 {len(stats)}명", "━━━━━━━━━━━━━━"]
         for rank, (nickname, count) in enumerate(stats, start=1):
             lines.append(f"{rank}. {nickname} - {count}회")
         return fold_long_reply("\n".join(lines))

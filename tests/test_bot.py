@@ -1188,10 +1188,10 @@ async def test_raid_guide_and_cancel_ranking(tmp_path) -> None:
     await bot.handle("/레이드모집 잠만보 host 123456789012", room="레이드방", sender="회장")
     await bot.handle("/참가 flaky 잠만보 host", room="레이드방", sender="일반")
     first_cancel = await bot.handle("/취소 flaky 잠만보 host", room="레이드방", sender="일반")
-    assert "오늘 1번째 취소예요." in first_cancel.reply
+    assert "취소 횟수 : 오늘 1회 · 누적 1회" in first_cancel.reply
     await bot.handle("/참가 flaky 잠만보 host", room="레이드방", sender="일반")
     second_cancel = await bot.handle("/취소 flaky 잠만보 host", room="레이드방", sender="일반")
-    assert "오늘 2번째 취소예요." in second_cancel.reply
+    assert "취소 횟수 : 오늘 2회 · 누적 2회" in second_cancel.reply
 
     await bot.handle("/참가 steady 잠만보 host", room="레이드방", sender="일반")
     await bot.handle("/취소 steady 잠만보 host", room="레이드방", sender="일반")
@@ -1208,10 +1208,16 @@ async def test_raid_guide_and_cancel_ranking(tmp_path) -> None:
     lines = [
         line for line in ranking.reply.replace(FOLD_PADDING, "").split(chr(10)) if line
     ]
-    assert lines[0] == "✂️ 레이드 취소 이력 — 총 14명"
-    assert lines[2] == "1. flaky - 2회"  # 횟수 많은 순
+    assert lines[0] == "✂️ 오늘의 레이드 취소 — 총 14명"
+    assert lines[2] == "1. flaky - 2회"  # 오늘 횟수 많은 순
     assert lines[-1] == "14. steady - 1회"  # 동률은 최근 취소가 위로
     assert len(lines) == 2 + 14  # 제목/구분선 + 전원 (자르지 않음)
+
+    # 하루가 지나면 랭킹은 비워진다 (누적 기록은 유지).
+    from datetime import date, timedelta
+
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    assert bot.admin_store.list_raid_cancel_stats("레이드방", tomorrow) == []
 
 
 @pytest.mark.anyio
