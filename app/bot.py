@@ -708,7 +708,8 @@ class PokemonGoBot:
             f"🔥 {pokemon_display} 레이드 모집 시작!\n"
             f"참가: /레이드참가 게임닉네임 {pokemon_display}\n"
             f"취소: /레이드취소 게임닉네임 {pokemon_display}\n"
-            f"명단: /레이드현황 {pokemon_display}"
+            f"명단: /레이드현황 {pokemon_display}\n"
+            "571933305033로 친추주셔야 초대 갑니다!"
         )
 
     def _handle_raid_close(self, user: ChatUser, query: str) -> str:
