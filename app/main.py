@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from app.admin_page import ADMIN_PAGE
-from app.bot import PokemonGoBot, parse_command
+from app.bot import PokemonGoBot, normalize_room, parse_command
 from app.pogo_api import PogoApiClient, format_dex_reply
 
 
@@ -326,7 +326,7 @@ async def admin_rooms() -> list[str]:
 
 @app.get("/admin/commands", dependencies=[Depends(_verify_bridge_key)])
 async def admin_list_commands(room: str) -> list[dict[str, Any]]:
-    records = bot.admin_store.list_custom_command_records(room.strip())
+    records = bot.admin_store.list_custom_command_records(normalize_room(room))
     return [
         {"command": record.display_command, "length": len(record.response)}
         for record in records
@@ -336,10 +336,11 @@ async def admin_list_commands(room: str) -> list[dict[str, Any]]:
 @app.delete("/admin/command", dependencies=[Depends(_verify_bridge_key)])
 async def admin_delete_command(room: str, command: str) -> dict[str, Any]:
     normalized = PokemonGoBot._normalize_custom_command(command)
-    if not room.strip() or not normalized:
+    clean_room = normalize_room(room)
+    if not clean_room or not normalized:
         raise HTTPException(status_code=400, detail="방과 명령어 이름을 입력해 주세요.")
 
-    deleted = bot.admin_store.delete_custom_command(room.strip(), normalized)
+    deleted = bot.admin_store.delete_custom_command(clean_room, normalized)
     if not deleted:
         raise HTTPException(
             status_code=404,
@@ -351,7 +352,7 @@ async def admin_delete_command(room: str, command: str) -> dict[str, Any]:
 @app.get("/admin/command", dependencies=[Depends(_verify_bridge_key)])
 async def admin_get_command(room: str, command: str) -> dict[str, Any]:
     normalized = PokemonGoBot._normalize_custom_command(command)
-    custom = bot.admin_store.get_custom_command(room.strip(), normalized)
+    custom = bot.admin_store.get_custom_command(normalize_room(room), normalized)
     if custom is None:
         return {"found": False}
     return {"found": True, "command": normalized, "response": custom.response}
@@ -359,7 +360,7 @@ async def admin_get_command(room: str, command: str) -> dict[str, Any]:
 
 @app.post("/admin/command", dependencies=[Depends(_verify_bridge_key)])
 async def admin_save_command(request: AdminCommandRequest) -> dict[str, Any]:
-    room = request.room.strip()
+    room = normalize_room(request.room)
     normalized = PokemonGoBot._normalize_custom_command(request.command)
     response = request.response.strip()
     if not room or not normalized or not response:
@@ -373,8 +374,8 @@ async def admin_save_command(request: AdminCommandRequest) -> dict[str, Any]:
 
 @app.post("/admin/rename-room", dependencies=[Depends(_verify_bridge_key)])
 async def admin_rename_room(request: RenameRoomRequest) -> dict[str, Any]:
-    old_room = request.old_room.strip()
-    new_room = request.new_room.strip()
+    old_room = normalize_room(request.old_room)
+    new_room = normalize_room(request.new_room)
     if not old_room or not new_room:
         raise HTTPException(status_code=400, detail="옛 이름과 새 이름을 모두 입력해 주세요.")
     if old_room == new_room:

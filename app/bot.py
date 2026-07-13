@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 
@@ -41,6 +42,28 @@ def fold_long_reply(content: str) -> str:
     if not separator:
         return content
     return f"{first_line}{FOLD_PADDING}\n{rest}"
+# 이모지 스타일 지정자(U+FE0F 등)와 폭 없는 공백처럼 눈에 안 보이는 문자들.
+# 방 이름에 섞이면 겉보기에 같은 이름이 서로 다른 방으로 갈라진다.
+_ROOM_INVISIBLE_CHARS = dict.fromkeys([
+    0xFE0E,  # 텍스트 스타일 지정자
+    0xFE0F,  # 이모지 스타일 지정자
+    0x200B,  # 폭 없는 공백
+    0x200C,  # 폭 없는 비결합자
+    0x200D,  # 폭 없는 결합자
+    0xFEFF,  # BOM/폭 없는 줄바꿈 방지 공백
+])
+
+
+def normalize_room(room: str) -> str:
+    """방 이름에서 보이지 않는 문자를 제거하고 공백을 정리한다.
+
+    폰 알림·웹 입력·카톡 타이핑 등 어느 경로로 들어와도 같은 방은 같은
+    문자열이 되도록 모든 입구에서 이 함수를 거친다.
+    """
+    cleaned = unicodedata.normalize("NFC", room or "").translate(_ROOM_INVISIBLE_CHARS)
+    return " ".join(cleaned.split())
+
+
 DAILY_CHECK_IN_POINTS = 5
 DAILY_FORTUNES = [
     "오늘은 100% 개체값이 뜰 운세!",
@@ -478,7 +501,7 @@ class PokemonGoBot:
 
     @staticmethod
     def _chat_user(room: str, sender: str, user_key: str | None) -> ChatUser:
-        clean_room = room.strip() or "local"
+        clean_room = normalize_room(room) or "local"
         clean_sender = sender.strip() or "unknown"
         clean_key = (user_key or "").strip() or f"sender:{clean_sender}"
         return ChatUser(room=clean_room, sender=clean_sender, user_key=clean_key)
@@ -510,7 +533,7 @@ class PokemonGoBot:
         return False
 
     def _handle_target_set(self, user: ChatUser, target_room: str) -> str:
-        clean_target = target_room.strip()
+        clean_target = normalize_room(target_room)
         if not clean_target:
             return "대상 공개방 이름을 입력해 주세요. 예: /대상방설정 포켓몬고 레이드방"
 

@@ -934,6 +934,34 @@ async def test_long_custom_reply_is_folded_and_fold_test_pads(tmp_path) -> None:
 
 
 @pytest.mark.anyio
+async def test_room_names_are_normalized_across_entrances(tmp_path) -> None:
+    from app.bot import normalize_room
+
+    # 이모지 스타일 지정자(U+FE0F)와 폭 없는 공백이 지워지고 공백이 정리된다.
+    assert normalize_room("✨️포켓몬고  레이드 ") == "✨포켓몬고 레이드"
+    assert normalize_room("✨포켓몬고 레이드") == "✨포켓몬고 레이드"
+
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    # 폰이 보내는 깨끗한 이름으로 오너 등록·명령어 등록
+    await bot.handle("/오너등록 test-setup-code", room="✨레이드방", sender="오너")
+    await bot.handle("/명령어등록 공지 정규화 테스트", room="✨레이드방", sender="오너")
+
+    # 손으로 타이핑한 U+FE0F 붙은 이름으로 대상방을 설정해도 같은 방을 가리킨다.
+    await bot.handle(
+        "/대상방설정 ✨️레이드방", room="개인방", sender="오너", user_key="sender:오너"
+    )
+    shown = await bot.handle("/대상방확인", room="개인방", sender="오너", user_key="sender:오너")
+    assert shown.reply == "현재 대상방: ✨레이드방"
+
+    # 유령 이름의 방에서 온 메시지도 진짜 방으로 정규화된다.
+    reply = await bot.handle("/공지", room="✨️레이드방 ", sender="일반")
+    assert reply.reply == "정규화 테스트"
+
+
+@pytest.mark.anyio
 async def test_raid_signup_roster_and_party_split(tmp_path) -> None:
     bot = PokemonGoBot(
         admin_store=AdminStore(tmp_path / "test.sqlite3"),
