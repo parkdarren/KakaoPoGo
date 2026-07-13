@@ -1183,22 +1183,35 @@ async def test_raid_guide_and_cancel_ranking(tmp_path) -> None:
     assert FOLD_PADDING in guide.reply
     assert guide.reply.replace(FOLD_PADDING, "") == RAID_GUIDE
 
-    # 취소할 때마다 닉네임별로 누적 기록된다.
+    # 취소할 때마다 입력한 게임 닉네임 기준으로 누적되고,
+    # 응답 맨 아래에 오늘 몇 번째 취소인지 나온다.
     await bot.handle("/레이드모집 잠만보 host 123456789012", room="레이드방", sender="회장")
-    for _ in range(2):
-        await bot.handle("/참가 flaky 잠만보 host", room="레이드방", sender="일반")
-        await bot.handle("/취소 flaky 잠만보 host", room="레이드방", sender="일반")
+    await bot.handle("/참가 flaky 잠만보 host", room="레이드방", sender="일반")
+    first_cancel = await bot.handle("/취소 flaky 잠만보 host", room="레이드방", sender="일반")
+    assert "오늘 1번째 취소예요." in first_cancel.reply
+    await bot.handle("/참가 flaky 잠만보 host", room="레이드방", sender="일반")
+    second_cancel = await bot.handle("/취소 flaky 잠만보 host", room="레이드방", sender="일반")
+    assert "오늘 2번째 취소예요." in second_cancel.reply
+
     await bot.handle("/참가 steady 잠만보 host", room="레이드방", sender="일반")
     await bot.handle("/취소 steady 잠만보 host", room="레이드방", sender="일반")
+
+    # 12명이 더 취소해도 랭킹은 자르지 않고 전원 보여준다.
+    for index in range(12):
+        await bot.handle(f"/참가 extra{index:02d} 잠만보 host", room="레이드방", sender="일반")
+        await bot.handle(f"/취소 extra{index:02d} 잠만보 host", room="레이드방", sender="일반")
 
     denied = await bot.handle("/취소랭킹", room="레이드방", sender="일반")
     assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
     ranking = await bot.handle("/취소랭킹", room="레이드방", sender="회장")
-    lines = ranking.reply.split(chr(10))
-    assert lines[0] == "✂️ 레이드 취소 이력 TOP 10"
-    assert lines[2] == "1. flaky - 2회"
-    assert lines[3] == "2. steady - 1회"
+    lines = [
+        line for line in ranking.reply.replace(FOLD_PADDING, "").split(chr(10)) if line
+    ]
+    assert lines[0] == "✂️ 레이드 취소 이력 — 총 14명"
+    assert lines[2] == "1. flaky - 2회"  # 횟수 많은 순
+    assert lines[-1] == "14. steady - 1회"  # 동률은 최근 취소가 위로
+    assert len(lines) == 2 + 14  # 제목/구분선 + 전원 (자르지 않음)
 
 
 @pytest.mark.anyio

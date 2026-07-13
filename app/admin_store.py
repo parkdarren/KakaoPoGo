@@ -170,6 +170,8 @@ class AdminStore:
                     """
                 )
             self._ensure_column(conn, "raid_sessions", "friend_code", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "raid_cancel_stats", "daily_count", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "raid_cancel_stats", "last_cancel_date", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "custom_commands", "display_command", "TEXT")
             self._ensure_column(conn, "custom_commands", "taught_by", "TEXT")
             self._ensure_column(conn, "custom_commands", "taught_at", "TEXT")
@@ -454,23 +456,44 @@ class AdminStore:
             ),
         )
 
-    def record_raid_cancel(self, room: str, nickname: str) -> None:
-        """레이드 취소 횟수를 닉네임별로 누적한다."""
+    def record_raid_cancel(self, room: str, nickname: str, today: str) -> tuple[int, int]:
+        """취소 횟수를 닉네임별로 누적하고 (오늘 횟수, 누적 횟수)를 돌려준다."""
+        nickname_key = nickname.lower()
         with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT cancel_count, daily_count, last_cancel_date
+                FROM raid_cancel_stats
+                WHERE room = ? AND nickname_key = ?
+                """,
+                (room, nickname_key),
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO raid_cancel_stats
+                        (room, nickname_key, nickname, cancel_count, daily_count, last_cancel_date)
+                    VALUES (?, ?, ?, 1, 1, ?)
+                    """,
+                    (room, nickname_key, nickname, today),
+                )
+                return 1, 1
+
+            total = row["cancel_count"] + 1
+            daily = row["daily_count"] + 1 if row["last_cancel_date"] == today else 1
             conn.execute(
                 """
-                INSERT INTO raid_cancel_stats (room, nickname_key, nickname, cancel_count)
-                VALUES (?, ?, ?, 1)
-                ON CONFLICT(room, nickname_key)
-                DO UPDATE SET cancel_count = cancel_count + 1,
-                              nickname = excluded.nickname,
-                              last_cancel_at = CURRENT_TIMESTAMP
+                UPDATE raid_cancel_stats
+                SET cancel_count = ?, daily_count = ?, last_cancel_date = ?,
+                    nickname = ?, last_cancel_at = CURRENT_TIMESTAMP
+                WHERE room = ? AND nickname_key = ?
                 """,
-                (room, nickname.lower(), nickname),
+                (total, daily, today, nickname, room, nickname_key),
             )
+            return daily, total
 
-    def list_raid_cancel_stats(self, room: str, limit: int = 10) -> list[tuple[str, int]]:
-        """(닉네임, 취소 횟수)를 많이 취소한 순서로 돌려준다."""
+    def list_raid_cancel_stats(self, room: str) -> list[tuple[str, int]]:
+        """취소 기록이 있는 모든 사람을 (닉네임, 누적 횟수)로, 많은 순서대로."""
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -478,9 +501,8 @@ class AdminStore:
                 FROM raid_cancel_stats
                 WHERE room = ?
                 ORDER BY cancel_count DESC, last_cancel_at DESC
-                LIMIT ?
                 """,
-                (room, limit),
+                (room,),
             ).fetchall()
         return [(row["nickname"], row["cancel_count"]) for row in rows]
 

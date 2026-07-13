@@ -782,11 +782,14 @@ class PokemonGoBot:
         )
         if not removed:
             return f"'{nickname}' 님은 {pokemon_display}({host}) 명단에 없어요."
-        self.admin_store.record_raid_cancel(user.room, nickname)
+        daily, _total = self.admin_store.record_raid_cancel(
+            user.room, nickname, date.today().isoformat()
+        )
         return (
             "✂️ 취소 완료\n"
             f"🎯 {pokemon_display} (모집: {host}) · 현재 {count}명\n"
-            f"'{nickname}' 님을 명단에서 뺐어요."
+            f"'{nickname}' 님을 명단에서 뺐어요.\n"
+            f"오늘 {daily}번째 취소예요."
         )
 
     def _handle_raid_list(self, user: ChatUser, query: str) -> str:
@@ -863,14 +866,14 @@ class PokemonGoBot:
         if not self.admin_store.is_admin_or_owner(user):
             return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
-        stats = self.admin_store.list_raid_cancel_stats(user.room, limit=10)
+        stats = self.admin_store.list_raid_cancel_stats(user.room)
         if not stats:
             return "이 방의 레이드 취소 기록이 아직 없어요."
 
-        lines = ["✂️ 레이드 취소 이력 TOP 10", "━━━━━━━━━━━━━━"]
+        lines = [f"✂️ 레이드 취소 이력 — 총 {len(stats)}명", "━━━━━━━━━━━━━━"]
         for rank, (nickname, count) in enumerate(stats, start=1):
             lines.append(f"{rank}. {nickname} - {count}회")
-        return "\n".join(lines)
+        return fold_long_reply("\n".join(lines))
 
     def _handle_raid_clear(self, user: ChatUser, query: str) -> str:
         if not self.admin_store.is_admin_or_owner(user):
