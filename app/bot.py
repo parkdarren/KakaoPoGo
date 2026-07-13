@@ -157,11 +157,45 @@ BUILTIN_HELP_ENTRIES = [
         "예시 : /참가 GoTrainer 오리진디아루가 RaidMaster\n"
         "취소 : /취소 닉네임 포켓몬이름 모집자\n"
         "명단 : /현황 (전체) 또는 /현황 포켓몬이름 모집자\n"
-        "마감 : /마감 포켓몬이름 모집자",
+        "마감 : /마감 포켓몬이름 모집자\n"
+        "자세한 안내 : /레이드신청",
     ),
 ]
 RAID_PARTY_SIZE = 10
+RAID_GUIDE = (
+    "🎫 레이드 초대 받는 방법\n"
+    "━━━━━━━━━━━━━━━━━━\n"
+    "\n"
+    "1️⃣ 모집글 확인\n"
+    "채팅방의 \"🔥 레이드 모집 오픈!\" 글에서\n"
+    "포켓몬·모집자·친구코드를 확인하세요.\n"
+    "(놓쳤다면 /현황 으로 언제든 확인!)\n"
+    "\n"
+    "2️⃣ 모집자에게 친추 먼저!\n"
+    "모집글에 있는 친구코드로 친구 신청\n"
+    "→ 친추가 안 되어 있으면 초대를 못 받아요\n"
+    "\n"
+    "3️⃣ 참가 신청\n"
+    "/참가 내게임닉네임 포켓몬이름 모집자\n"
+    "예) /참가 GoTrainer 오리진디아루가 RaidMaster\n"
+    "\n"
+    "⚠️ 신청이 안 될 때 체크!\n"
+    "· 카톡 닉네임 ❌ → 게임 닉네임 ⭕\n"
+    "· 포켓몬 이름·모집자는 모집글과 똑같이\n"
+    "· \"✅ 신청 완료!\" 가 떴으면 성공\n"
+    "\n"
+    "4️⃣ 초대 기다리기\n"
+    "게임에 접속해 있으면 모집자가\n"
+    "명단 순서대로 초대를 보내드려요.\n"
+    "\n"
+    "😅 못 가게 됐다면 (매너!)\n"
+    "/취소 내게임닉네임 포켓몬이름 모집자\n"
+    "\n"
+    "👀 내가 명단에 있는지 확인\n"
+    "/현황 포켓몬이름 모집자"
+)
 ADMIN_COMMANDS = [
+    "/취소랭킹",
     "/레이드초기화 전체(또는 포켓몬이름 모집자)",
     "/대상방설정 공개방이름",
     "/대상방확인",
@@ -224,6 +258,10 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "attendance_ranking", query
     if command in ("접기테스트",):
         return "fold_test", query
+    if command in ("레이드신청", "레이드방법", "레이드안내"):
+        return "raid_guide", query
+    if command in ("취소랭킹", "레이드취소랭킹"):
+        return "raid_cancel_stats", query
     if command in ("레이드모집",):
         return "raid_open", query
     if command in ("참가", "레이드참가"):
@@ -333,6 +371,12 @@ class PokemonGoBot:
 
         if command == "fold_test":
             return BotResponse(self._handle_fold_test(query))
+
+        if command == "raid_guide":
+            return BotResponse(fold_long_reply(RAID_GUIDE))
+
+        if command == "raid_cancel_stats":
+            return BotResponse(self._handle_raid_cancel_stats(user))
 
         if command == "raid_open":
             return BotResponse(self._handle_raid_open(user, query))
@@ -738,6 +782,7 @@ class PokemonGoBot:
         )
         if not removed:
             return f"'{nickname}' 님은 {pokemon_display}({host}) 명단에 없어요."
+        self.admin_store.record_raid_cancel(user.room, nickname)
         return (
             "✂️ 취소 완료\n"
             f"🎯 {pokemon_display} (모집: {host}) · 현재 {count}명\n"
@@ -812,6 +857,19 @@ class PokemonGoBot:
         lines.extend(self._party_lines(nicknames))
         lines.append("━━━━━━━━━━━━━━")
         lines.append("참여해 주신 분들 고생하셨어요! 🎉")
+        return "\n".join(lines)
+
+    def _handle_raid_cancel_stats(self, user: ChatUser) -> str:
+        if not self.admin_store.is_admin_or_owner(user):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+
+        stats = self.admin_store.list_raid_cancel_stats(user.room, limit=10)
+        if not stats:
+            return "이 방의 레이드 취소 기록이 아직 없어요."
+
+        lines = ["✂️ 레이드 취소 이력 TOP 10", "━━━━━━━━━━━━━━"]
+        for rank, (nickname, count) in enumerate(stats, start=1):
+            lines.append(f"{rank}. {nickname} - {count}회")
         return "\n".join(lines)
 
     def _handle_raid_clear(self, user: ChatUser, query: str) -> str:
@@ -1152,6 +1210,11 @@ class PokemonGoBot:
             "출석랭킹",
             "출첵랭킹",
             "접기테스트",
+            "레이드신청",
+            "레이드방법",
+            "레이드안내",
+            "취소랭킹",
+            "레이드취소랭킹",
             "레이드모집",
             "참가",
             "레이드참가",

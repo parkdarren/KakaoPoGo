@@ -77,7 +77,7 @@ async def test_unknown_slash_command_stays_silent(tmp_path) -> None:
         owner_setup_code="test-setup-code",
     )
 
-    for text in ("/레이드신청", "/좌표", "/뉴비초대 3명이요", "/"):
+    for text in ("/타봇명령어", "/좌표", "/뉴비초대 3명이요", "/"):
         response = await bot.handle(text, room="레이드방", sender="일반")
         assert response.silent is True, text
         assert response.reply == ""
@@ -85,7 +85,7 @@ async def test_unknown_slash_command_stays_silent(tmp_path) -> None:
 
 @pytest.mark.anyio
 async def test_unknown_slash_command_returns_silent_http_response() -> None:
-    response = await command_get("/레이드신청", room="레이드방", sender="일반")
+    response = await command_get("/타봇명령어", room="레이드방", sender="일반")
 
     assert response == {"reply": "", "silent": True}
 
@@ -1165,6 +1165,40 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
     assert left.reply.startswith("✂️ 취소 완료")
     assert "'DongDoro' 님을 명단에서 뺐어요." in left.reply
     assert "현재 11명" in left.reply
+
+
+@pytest.mark.anyio
+async def test_raid_guide_and_cancel_ranking(tmp_path) -> None:
+    from app.bot import FOLD_PADDING, RAID_GUIDE
+
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="회장")
+
+    # /레이드신청은 기본 안내문이고, 길어서 첫 줄만 보이게 접힌다.
+    guide = await bot.handle("/레이드신청", room="레이드방", sender="일반")
+    assert guide.reply.startswith("🎫 레이드 초대 받는 방법")
+    assert FOLD_PADDING in guide.reply
+    assert guide.reply.replace(FOLD_PADDING, "") == RAID_GUIDE
+
+    # 취소할 때마다 닉네임별로 누적 기록된다.
+    await bot.handle("/레이드모집 잠만보 host 123456789012", room="레이드방", sender="회장")
+    for _ in range(2):
+        await bot.handle("/참가 flaky 잠만보 host", room="레이드방", sender="일반")
+        await bot.handle("/취소 flaky 잠만보 host", room="레이드방", sender="일반")
+    await bot.handle("/참가 steady 잠만보 host", room="레이드방", sender="일반")
+    await bot.handle("/취소 steady 잠만보 host", room="레이드방", sender="일반")
+
+    denied = await bot.handle("/취소랭킹", room="레이드방", sender="일반")
+    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+
+    ranking = await bot.handle("/취소랭킹", room="레이드방", sender="회장")
+    lines = ranking.reply.split(chr(10))
+    assert lines[0] == "✂️ 레이드 취소 이력 TOP 10"
+    assert lines[2] == "1. flaky - 2회"
+    assert lines[3] == "2. steady - 1회"
 
 
 @pytest.mark.anyio

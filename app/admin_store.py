@@ -138,6 +138,15 @@ class AdminStore:
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (room, pokemon_key, host_key, nickname_key)
                 );
+
+                CREATE TABLE IF NOT EXISTS raid_cancel_stats (
+                    room TEXT NOT NULL,
+                    nickname_key TEXT NOT NULL,
+                    nickname TEXT NOT NULL,
+                    cancel_count INTEGER NOT NULL DEFAULT 0,
+                    last_cancel_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (room, nickname_key)
+                );
                 """
             )
             raid_columns = {
@@ -444,6 +453,36 @@ class AdminStore:
                 name.swapcase(),
             ),
         )
+
+    def record_raid_cancel(self, room: str, nickname: str) -> None:
+        """레이드 취소 횟수를 닉네임별로 누적한다."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO raid_cancel_stats (room, nickname_key, nickname, cancel_count)
+                VALUES (?, ?, ?, 1)
+                ON CONFLICT(room, nickname_key)
+                DO UPDATE SET cancel_count = cancel_count + 1,
+                              nickname = excluded.nickname,
+                              last_cancel_at = CURRENT_TIMESTAMP
+                """,
+                (room, nickname.lower(), nickname),
+            )
+
+    def list_raid_cancel_stats(self, room: str, limit: int = 10) -> list[tuple[str, int]]:
+        """(닉네임, 취소 횟수)를 많이 취소한 순서로 돌려준다."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT nickname, cancel_count
+                FROM raid_cancel_stats
+                WHERE room = ?
+                ORDER BY cancel_count DESC, last_cancel_at DESC
+                LIMIT ?
+                """,
+                (room, limit),
+            ).fetchall()
+        return [(row["nickname"], row["cancel_count"]) for row in rows]
 
     def list_raid_sessions(self, room: str) -> list[tuple[str, str, int]]:
         """(포켓몬 표시명, 모집자 표시명, 인원) 목록. 개설 순서대로."""
