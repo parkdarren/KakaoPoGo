@@ -126,8 +126,13 @@ ADMIN_PAGE = """<!doctype html>
   <input id="room" placeholder="새 방 이름 (봇이 보는 이름과 정확히 같아야 함)"
     style="display:none">
 
-  <div class="chips" id="cmdChips"></div>
-  <p class="hint" id="chipsHint" style="display:none">등록된 명령어예요. 누르면 내용을 불러옵니다.</p>
+  <div class="btnrow" style="margin-top:10px">
+    <button class="ghost" id="cmdToggle" type="button" onclick="toggleCommands()">📋 등록된 명령어 보기</button>
+  </div>
+  <div id="cmdPanel" style="display:none">
+    <div class="chips" id="cmdChips"></div>
+    <p class="hint" id="chipsHint">누르면 내용을 불러옵니다.</p>
+  </div>
 
   <label>명령어 이름</label>
   <div class="cmdrow"><span class="slash">/</span><input id="command" placeholder="예: 이벤"></div>
@@ -185,7 +190,8 @@ function currentRoom() {
 $("roomSelect").addEventListener("change", () => {
   $("room").style.display = $("roomSelect").value === "__custom__" ? "block" : "none";
   localStorage.setItem("kpg-room", currentRoom());
-  refreshCommands();
+  // 방이 바뀌면 목록을 닫는다. 다시 열면 그 방의 명령어가 나온다.
+  hideCommands();
 });
 
 function headers() {
@@ -213,22 +219,39 @@ async function refreshRooms() {
   if (rooms.includes(saved)) select.value = saved;
   $("rooms").innerHTML = "";
   rooms.forEach((r) => $("rooms").appendChild(option(r, r)));
-  refreshCommands();
 }
 $("key").addEventListener("change", refreshRooms);
 refreshRooms();
 
+function hideCommands() {
+  $("cmdPanel").style.display = "none";
+  $("cmdChips").innerHTML = "";
+  $("cmdToggle").textContent = "📋 등록된 명령어 보기";
+}
+
+async function toggleCommands() {
+  if ($("cmdPanel").style.display !== "none") return hideCommands();
+  if (!currentRoom() || $("roomSelect").value === "__custom__") {
+    return show("방을 먼저 선택해 주세요.", false);
+  }
+  await refreshCommands();
+}
+
 async function refreshCommands() {
   const box = $("cmdChips");
   box.innerHTML = "";
-  $("chipsHint").style.display = "none";
-  if (!currentRoom() || $("roomSelect").value === "__custom__") return;
   const params = new URLSearchParams({ room: currentRoom() });
   const res = await fetch("/admin/commands?" + params, { headers: headers() });
+  if (res.status === 403) return show("관리 키가 올바르지 않습니다.", false);
   if (!res.ok) return;
   const commands = await res.json();
-  if (!commands.length) return;
-  $("chipsHint").style.display = "block";
+  $("cmdPanel").style.display = "block";
+  $("cmdToggle").textContent = "📋 명령어 목록 접기 (" + commands.length + "개)";
+  if (!commands.length) {
+    $("chipsHint").textContent = "이 방에 등록된 명령어가 아직 없어요.";
+    return;
+  }
+  $("chipsHint").textContent = "누르면 내용을 불러옵니다.";
   commands.forEach((item) => {
     const chip = document.createElement("button");
     chip.className = "chip";
@@ -280,7 +303,7 @@ async function save() {
   const data = await res.json();
   if (!res.ok) return show(data.detail || "저장에 실패했습니다.", false);
   show("/" + data.command + " 저장 완료! (" + data.length + "자)", true);
-  refreshCommands();
+  if ($("cmdPanel").style.display !== "none") refreshCommands();
 }
 
 async function deleteCommand() {
@@ -299,7 +322,7 @@ async function deleteCommand() {
   $("response").value = "";
   $("count").textContent = "";
   show("/" + data.command + " 명령어를 삭제했습니다.", true);
-  refreshCommands();
+  if ($("cmdPanel").style.display !== "none") refreshCommands();
 }
 
 async function renameRoom() {
