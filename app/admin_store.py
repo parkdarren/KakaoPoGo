@@ -327,7 +327,13 @@ class AdminStore:
             ).fetchall()
         if not rows:
             return "", []
-        nicknames = sorted((row["nickname"] for row in rows), key=str.lower)
+        # 숫자 -> 영문 -> 한글 순. 영문은 대소문자를 같은 순서로 취급하되,
+        # 같은 글자가 둘 다 있으면 소문자를 먼저 놓는다. (swapcase를 보조
+        # 키로 쓰면 'abc' < 'Abc'가 된다)
+        nicknames = sorted(
+            (row["nickname"] for row in rows),
+            key=lambda name: (name.lower(), name.swapcase()),
+        )
         return rows[0]["pokemon_display"], nicknames
 
     def list_raid_rosters(self, room: str) -> list[tuple[str, int]]:

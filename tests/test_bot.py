@@ -969,6 +969,14 @@ async def test_raid_signup_roster_and_party_split(tmp_path) -> None:
     assert lines[1].startswith("1팟(10명): DongDoro, 유저00")
     assert lines[2].startswith("2팟(2명): 유저09, 유저10")
 
+    # 정렬 규칙: 숫자 -> 영문(같은 글자면 소문자 먼저) -> 한글
+    await bot.handle("/레이드참가 Abc 잠만보", room="레이드방", sender="일반")
+    await bot.handle("/레이드참가 abc멤버 잠만보", room="레이드방", sender="일반")
+    await bot.handle("/레이드참가 7lucky 잠만보", room="레이드방", sender="일반")
+    await bot.handle("/레이드참가 가나다 잠만보", room="레이드방", sender="일반")
+    order = await bot.handle("/레이드명단 잠만보", room="레이드방", sender="회장")
+    assert "1팟(4명): 7lucky, Abc, abc멤버, 가나다" in order.reply
+
     summary = await bot.handle("/레이드명단", room="레이드방", sender="회장")
     assert "- 오리진 디아루가: 12명" in summary.reply
 
