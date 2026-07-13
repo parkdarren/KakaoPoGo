@@ -1023,6 +1023,40 @@ async def test_raid_signup_roster_and_party_split(tmp_path) -> None:
 
 
 @pytest.mark.anyio
+async def test_raid_open_and_close_flow(tmp_path) -> None:
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="회장")
+
+    denied = await bot.handle("/레이드모집 화이트큐레무", room="레이드방", sender="일반")
+    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+
+    # 이전 명단이 남아 있어도 모집 시작 시 새로 비워진다.
+    await bot.handle("/레이드참가 남은사람 화이트큐레무", room="레이드방", sender="일반")
+    opened = await bot.handle("/레이드모집 화이트큐레무", room="레이드방", sender="회장")
+    assert opened.reply.startswith("🔥 화이트큐레무 레이드 모집 시작!")
+    assert "/레이드참가 게임닉네임 화이트큐레무" in opened.reply
+
+    await bot.handle("/레이드참가 alpha 화이트큐레무", room="레이드방", sender="일반")
+    await bot.handle("/레이드참가 bravo 화이트큐레무", room="레이드방", sender="일반")
+    # /레이드취소, /레이드현황 별칭도 동작한다.
+    await bot.handle("/레이드취소 bravo 화이트큐레무", room="레이드방", sender="일반")
+    status = await bot.handle("/레이드현황 화이트큐레무", room="레이드방", sender="일반")
+    assert "총 1명" in status.reply
+    assert "남은사람" not in status.reply  # 모집 시작 때 비워졌다
+
+    closed = await bot.handle("/레이드마감 화이트큐레무", room="레이드방", sender="회장")
+    assert closed.reply.startswith("🔒 화이트큐레무 레이드 마감 — 총 1명")
+    assert "1팟(1명): alpha" in closed.reply
+
+    # 마감하면 명단이 자동으로 비워진다.
+    after = await bot.handle("/레이드현황 화이트큐레무", room="레이드방", sender="회장")
+    assert "비어 있어요" in after.reply
+
+
+@pytest.mark.anyio
 async def test_custom_append_extends_existing_command(tmp_path) -> None:
     bot = PokemonGoBot(
         admin_store=AdminStore(tmp_path / "test.sqlite3"),

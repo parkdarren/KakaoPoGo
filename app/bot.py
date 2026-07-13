@@ -150,12 +150,15 @@ BUILTIN_HELP_ENTRIES = [
         "/레이드참가 닉네임 포켓몬이름",
         "레이드 초대 명단에 등록합니다. 닉네임은 게임 닉네임으로!\n"
         "예시 : /레이드참가 DongDoro 오리진디아루가\n"
-        "취소 : /레이드참가취소 닉네임 포켓몬이름\n"
-        "명단 : /레이드명단 포켓몬이름 (10명씩 팟 자동 배정)",
+        "취소 : /레이드취소 닉네임 포켓몬이름\n"
+        "명단 : /레이드현황 포켓몬이름 (10명씩 팟 자동 배정)",
     ),
 ]
 RAID_PARTY_SIZE = 10
 ADMIN_COMMANDS = [
+    "/레이드모집 포켓몬이름",
+    "/레이드마감 포켓몬이름",
+    "/레이드초기화 포켓몬이름(또는 전체)",
     "/대상방설정 공개방이름",
     "/대상방확인",
     "/명령어등록 공지 내용",
@@ -217,12 +220,16 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "attendance_ranking", query
     if command in ("접기테스트",):
         return "fold_test", query
+    if command in ("레이드모집",):
+        return "raid_open", query
     if command in ("레이드참가",):
         return "raid_join", query
-    if command in ("레이드참가취소", "레이드빠짐"):
+    if command in ("레이드참가취소", "레이드취소", "레이드빠짐"):
         return "raid_leave", query
-    if command in ("레이드명단", "레이드목록"):
+    if command in ("레이드명단", "레이드목록", "레이드현황"):
         return "raid_list", query
+    if command in ("레이드마감",):
+        return "raid_close", query
     if command in ("레이드초기화",):
         return "raid_clear", query
     if command in ("오너등록", "owner"):
@@ -323,8 +330,14 @@ class PokemonGoBot:
         if command == "fold_test":
             return BotResponse(self._handle_fold_test(query))
 
+        if command == "raid_open":
+            return BotResponse(self._handle_raid_open(user, query))
+
         if command == "raid_join":
             return BotResponse(self._handle_raid_join(user, query))
+
+        if command == "raid_close":
+            return BotResponse(self._handle_raid_close(user, query))
 
         if command == "raid_leave":
             return BotResponse(self._handle_raid_leave(user, query))
@@ -680,6 +693,48 @@ class PokemonGoBot:
             lines.append(f"{party_number}팟({len(party)}명): {', '.join(party)}")
         return "\n".join(lines)
 
+    def _handle_raid_open(self, user: ChatUser, query: str) -> str:
+        if not self.admin_store.is_admin_or_owner(user):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+
+        pokemon_display = query.strip()
+        if not pokemon_display:
+            return "모집할 포켓몬 이름을 입력해 주세요. 예: /레이드모집 오리진디아루가"
+
+        # 새 모집이니 같은 포켓몬의 이전 명단은 비우고 시작한다.
+        pokemon_key = pokemon_display.lower().replace(" ", "")
+        self.admin_store.clear_raid_signups(user.room, pokemon_key)
+        return (
+            f"🔥 {pokemon_display} 레이드 모집 시작!\n"
+            f"참가: /레이드참가 게임닉네임 {pokemon_display}\n"
+            f"취소: /레이드취소 게임닉네임 {pokemon_display}\n"
+            f"명단: /레이드현황 {pokemon_display}"
+        )
+
+    def _handle_raid_close(self, user: ChatUser, query: str) -> str:
+        if not self.admin_store.is_admin_or_owner(user):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+
+        pokemon_query = query.strip()
+        if not pokemon_query:
+            return "마감할 포켓몬 이름을 입력해 주세요. 예: /레이드마감 오리진디아루가"
+
+        pokemon_key = pokemon_query.lower().replace(" ", "")
+        pokemon_display, nicknames = self.admin_store.list_raid_signups(
+            user.room, pokemon_key
+        )
+        if not nicknames:
+            return f"'{pokemon_query}' 레이드 명단이 비어 있어요."
+
+        lines = [f"🔒 {pokemon_display} 레이드 마감 — 총 {len(nicknames)}명"]
+        for start in range(0, len(nicknames), RAID_PARTY_SIZE):
+            party = nicknames[start : start + RAID_PARTY_SIZE]
+            party_number = start // RAID_PARTY_SIZE + 1
+            lines.append(f"{party_number}팟({len(party)}명): {', '.join(party)}")
+        lines.append("순서대로 초대 갑니다. 게임 접속해 주세요!")
+        self.admin_store.clear_raid_signups(user.room, pokemon_key)
+        return "\n".join(lines)
+
     def _handle_raid_clear(self, user: ChatUser, query: str) -> str:
         if not self.admin_store.is_admin_or_owner(user):
             return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
@@ -1009,11 +1064,15 @@ class PokemonGoBot:
             "출석랭킹",
             "출첵랭킹",
             "접기테스트",
+            "레이드모집",
             "레이드참가",
             "레이드참가취소",
+            "레이드취소",
             "레이드빠짐",
             "레이드명단",
             "레이드목록",
+            "레이드현황",
+            "레이드마감",
             "레이드초기화",
             "오너등록",
             "owner",
