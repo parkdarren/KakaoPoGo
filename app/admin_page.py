@@ -316,10 +316,23 @@ async function refreshCommands() {
     size.textContent = item.length + "자";
     chip.appendChild(size);
     chip.onclick = () => {
+      // 이미 선택된 칩을 다시 누르면 선택을 취소하고 입력칸을 비운다.
+      if (chip.classList.contains("active")) {
+        chip.classList.remove("active");
+        $("command").value = "";
+        $("response").value = "";
+        $("count").textContent = "";
+        $("status").textContent = "";
+        $("status").className = "toast";
+        return;
+      }
       document.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
       chip.classList.add("active");
       $("command").value = item.command;
       load();
+      // 선택하면 명령어 이름 칸이 보이도록 내려간다.
+      // (smooth는 일부 웹뷰에서 무시되므로 즉시 이동을 쓴다)
+      $("command").scrollIntoView({ block: "center" });
     };
     box.appendChild(chip);
   });
