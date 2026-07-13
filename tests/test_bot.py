@@ -1089,7 +1089,7 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
 
     # 모집은 관리자가 아니어도 누구나 열 수 있다. 코드는 하이픈도 허용.
     opened = await bot.handle(
-        "/레이드모집 오리진 디아루가 놋 5719-3330-5033",
+        "/레이드모집 오리진 디아루가 놋 1234-5678-9012",
         room="레이드방",
         sender="일반유저",
         user_key="hash:host-not",
@@ -1098,7 +1098,7 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
     assert "🎯 포켓몬 : 오리진 디아루가" in opened.reply
     assert "👑 모집자 : 놋" in opened.reply
     assert "/참가 게임닉네임 오리진 디아루가 놋" in opened.reply
-    assert "친구코드 : 571933305033" in opened.reply
+    assert "친구코드 : 123456789012" in opened.reply
 
     bad = await bot.handle("/참가 닉네임만", room="레이드방", sender="일반")
     assert "형식은 이렇게" in bad.reply
@@ -1120,7 +1120,7 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
             "✅ 신청 완료!",
             "🎯 오리진 디아루가 (모집: 놋)",
             "🙋 DongDoro 님 · 현재 1명",
-            "🤝 친추 필수 → 571933305033",
+            "🤝 친추 필수 → 123456789012",
         ]
     )
     assert first.reply == expected_first
@@ -1143,7 +1143,7 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
     assert lines[4].startswith("2팟(2명): user09, user10")
 
     # 정렬: 영문 먼저, 숫자는 그 뒤 (포켓몬고 닉네임은 영문/숫자만 가능)
-    await bot.handle("/레이드모집 잠만보 놋 571933305033", room="레이드방", sender="놋")
+    await bot.handle("/레이드모집 잠만보 놋 123456789012", room="레이드방", sender="놋")
     await bot.handle("/참가 zeta 잠만보 놋", room="레이드방", sender="일반")
     await bot.handle("/참가 Abc 잠만보 놋", room="레이드방", sender="일반")
     await bot.handle("/참가 7lucky 잠만보 놋", room="레이드방", sender="일반")
@@ -1176,7 +1176,7 @@ async def test_raid_close_is_open_to_everyone(tmp_path) -> None:
     await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="회장")
 
     await bot.handle(
-        "/레이드모집 화이트큐레무 놋 571933305033",
+        "/레이드모집 화이트큐레무 놋 123456789012",
         room="레이드방",
         sender="놋",
         user_key="hash:host-not",
@@ -1201,7 +1201,7 @@ async def test_raid_close_is_open_to_everyone(tmp_path) -> None:
 
     # 초기화는 여전히 관리자 전용이다.
     await bot.handle(
-        "/레이드모집 잠만보 놋 571933305033", room="레이드방", sender="놋", user_key="hash:host-not"
+        "/레이드모집 잠만보 놋 123456789012", room="레이드방", sender="놋", user_key="hash:host-not"
     )
     denied_clear = await bot.handle("/레이드초기화 전체", room="레이드방", sender="일반")
     assert denied_clear.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
