@@ -181,6 +181,10 @@ ADMIN_PAGE = """<!doctype html>
   <input id="room" placeholder="새 방 이름 (봇이 보는 이름과 정확히 같아야 함)"
     style="display:none; margin-top:8px">
 
+  <label for="roomPw">방 비밀번호</label>
+  <input id="roomPw" type="password" placeholder="비밀번호가 설정된 방만 입력">
+  <p class="hint">비밀번호가 설정된 방은 이 비밀번호가 맞아야 저장·삭제할 수 있어요.</p>
+
   <div class="btnrow" style="margin-top:12px">
     <button class="ghost" id="cmdToggle" type="button" onclick="toggleCommands()">등록된 명령어 보기</button>
   </div>
@@ -205,6 +209,32 @@ ADMIN_PAGE = """<!doctype html>
 
 <section class="card">
   <details>
+    <summary>방 비밀번호 설정 / 변경</summary>
+    <p class="hint">비밀번호를 설정하면 그 방의 명령어는 비밀번호를 아는 사람만
+    수정·삭제할 수 있어요. 복구 단어는 비밀번호를 바꿀 때 쓰는 열쇠이니
+    잊지 마세요!</p>
+    <label for="pwRoom">대상 방</label>
+    <input id="pwRoom" list="rooms" placeholder="방 이름 (목록에서 선택)">
+
+    <label>처음 설정 — 비밀번호 / 복구 단어</label>
+    <input id="pwNew" type="password" placeholder="비밀번호 (4자 이상)">
+    <input id="pwRecovery" placeholder="복구 단어 (변경할 때 필요)" style="margin-top:6px">
+    <div class="btnrow">
+      <button class="ghost" onclick="setRoomPw()">비밀번호 설정</button>
+    </div>
+
+    <label>변경 — 복구 단어 / 새 비밀번호</label>
+    <input id="pwRecovery2" placeholder="설정할 때 정한 복구 단어">
+    <input id="pwNew2" type="password" placeholder="새 비밀번호 (4자 이상)" style="margin-top:6px">
+    <div class="btnrow">
+      <button class="ghost" onclick="changeRoomPw()">비밀번호 변경</button>
+    </div>
+    <div id="pwStatus" class="toast"></div>
+  </details>
+</section>
+
+<section class="card">
+  <details>
     <summary>방 이름 변경 이전 (방 제목이 바뀌었을 때만)</summary>
     <p class="hint">카톡방 제목이 바뀌면 봇이 새로운 방으로 인식해 명령어·관리자·출석이
     끊깁니다. 옛 이름의 데이터를 새 이름으로 옮깁니다.</p>
@@ -212,6 +242,8 @@ ADMIN_PAGE = """<!doctype html>
     <input id="oldRoom" list="rooms" placeholder="바뀌기 전 방 제목">
     <label for="newRoom">새 방 이름</label>
     <input id="newRoom" placeholder="바뀐 후 방 제목 (정확히)">
+    <label for="oldRoomPw">옛 방 비밀번호 (설정된 경우만)</label>
+    <input id="oldRoomPw" type="password" placeholder="없으면 비워두세요">
     <div class="btnrow">
       <button class="ghost" onclick="renameRoom()">이전 실행</button>
     </div>
@@ -242,11 +274,21 @@ function currentRoom() {
   return $("roomSelect").value;
 }
 
+function roomPw() {
+  return $("roomPw").value;
+}
+
 $("roomSelect").addEventListener("change", () => {
   $("room").style.display = $("roomSelect").value === "__custom__" ? "block" : "none";
   localStorage.setItem("kpg-room", currentRoom());
+  // 방마다 저장해 둔 비밀번호를 불러온다.
+  $("roomPw").value = localStorage.getItem("kpg-pw:" + currentRoom()) || "";
   // 방이 바뀌면 목록을 닫는다. 다시 열면 그 방의 명령어가 나온다.
   hideCommands();
+});
+
+$("roomPw").addEventListener("change", () => {
+  localStorage.setItem("kpg-pw:" + currentRoom(), $("roomPw").value);
 });
 
 function headers() {
@@ -365,6 +407,7 @@ async function save() {
       room: currentRoom(),
       command: $("command").value,
       response: $("response").value,
+      room_password: roomPw(),
     }),
   });
   if (res.status === 403) return show("관리 키가 올바르지 않습니다.", false);
@@ -379,7 +422,11 @@ async function deleteCommand() {
   const name = $("command").value.trim().replace(/^\\//, "");
   if (!name) return show("삭제할 명령어 이름을 입력해 주세요.", false);
   if (!confirm("'/" + name + "' 명령어를 정말 삭제할까요?")) return;
-  const params = new URLSearchParams({ room: currentRoom(), command: name });
+  const params = new URLSearchParams({
+    room: currentRoom(),
+    command: name,
+    password: roomPw(),
+  });
   const res = await fetch("/admin/command?" + params, {
     method: "DELETE",
     headers: headers(),
@@ -391,6 +438,54 @@ async function deleteCommand() {
   $("count").textContent = "";
   show("/" + data.command + " 명령어를 삭제했습니다.", true);
   if ($("cmdPanel").style.display !== "none") refreshCommands();
+}
+
+function pwOut(msg, ok) {
+  $("pwStatus").textContent = msg;
+  $("pwStatus").className = "toast " + (ok ? "ok" : "err");
+}
+
+async function setRoomPw() {
+  const room = $("pwRoom").value.trim();
+  if (!room) return pwOut("대상 방을 입력해 주세요.", false);
+  if (!$("pwNew").value || !$("pwRecovery").value.trim()) {
+    return pwOut("비밀번호와 복구 단어를 모두 입력해 주세요.", false);
+  }
+  const res = await fetch("/admin/room-password", {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      room: room,
+      password: $("pwNew").value,
+      recovery_word: $("pwRecovery").value.trim(),
+    }),
+  });
+  if (res.status === 403) return pwOut("관리 키가 올바르지 않습니다.", false);
+  const data = await res.json();
+  if (!res.ok) return pwOut(data.detail || "설정에 실패했습니다.", false);
+  localStorage.setItem("kpg-pw:" + room, $("pwNew").value);
+  pwOut("비밀번호를 설정했습니다. 복구 단어를 꼭 기억해 두세요!", true);
+}
+
+async function changeRoomPw() {
+  const room = $("pwRoom").value.trim();
+  if (!room) return pwOut("대상 방을 입력해 주세요.", false);
+  if (!$("pwRecovery2").value.trim() || !$("pwNew2").value) {
+    return pwOut("복구 단어와 새 비밀번호를 모두 입력해 주세요.", false);
+  }
+  const res = await fetch("/admin/room-password/change", {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      room: room,
+      recovery_word: $("pwRecovery2").value.trim(),
+      new_password: $("pwNew2").value,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) return pwOut(data.detail || "변경에 실패했습니다.", false);
+  localStorage.setItem("kpg-pw:" + room, $("pwNew2").value);
+  pwOut("비밀번호를 변경했습니다.", true);
 }
 
 async function renameRoom() {
@@ -406,7 +501,11 @@ async function renameRoom() {
   const res = await fetch("/admin/rename-room", {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify({ old_room: oldRoom, new_room: newRoom }),
+    body: JSON.stringify({
+      old_room: oldRoom,
+      new_room: newRoom,
+      room_password: $("oldRoomPw").value,
+    }),
   });
   if (res.status === 403) return out("관리 키가 올바르지 않습니다.", false);
   const data = await res.json();

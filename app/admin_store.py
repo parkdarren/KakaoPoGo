@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import secrets
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -105,6 +107,14 @@ class AdminStore:
                     total_days INTEGER NOT NULL DEFAULT 0,
                     points INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (room, user_key)
+                );
+
+                CREATE TABLE IF NOT EXISTS room_passwords (
+                    room TEXT PRIMARY KEY,
+                    salt TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    recovery_hash TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS raid_sessions (
@@ -472,6 +482,80 @@ class AdminStore:
             )
             conn.execute("DELETE FROM raid_signups WHERE room = ?", (room,))
             return cursor.rowcount
+
+    @staticmethod
+    def _hash_secret(salt: str, value: str) -> str:
+        return hashlib.sha256((salt + value).encode("utf-8")).hexdigest()
+
+    def has_room_password(self, room: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM room_passwords WHERE room = ?", (room,)
+            ).fetchone()
+        return row is not None
+
+    def set_room_password(self, room: str, password: str, recovery_word: str) -> bool:
+        """방 비밀번호를 처음 설정한다. 이미 있으면 False."""
+        if self.has_room_password(room):
+            return False
+        salt = secrets.token_hex(16)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO room_passwords (room, salt, password_hash, recovery_hash)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    room,
+                    salt,
+                    self._hash_secret(salt, password),
+                    self._hash_secret(salt, recovery_word),
+                ),
+            )
+        return True
+
+    def check_room_password(self, room: str, password: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT salt, password_hash FROM room_passwords WHERE room = ?",
+                (room,),
+            ).fetchone()
+        if row is None:
+            return False
+        return self._hash_secret(row["salt"], password) == row["password_hash"]
+
+    def change_room_password(
+        self,
+        room: str,
+        recovery_word: str,
+        new_password: str,
+    ) -> str:
+        """복구 단어가 맞으면 비밀번호를 바꾼다. 'ok' | 'missing' | 'wrong'."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT salt, recovery_hash FROM room_passwords WHERE room = ?",
+                (room,),
+            ).fetchone()
+            if row is None:
+                return "missing"
+            if self._hash_secret(row["salt"], recovery_word) != row["recovery_hash"]:
+                return "wrong"
+            new_salt = secrets.token_hex(16)
+            conn.execute(
+                """
+                UPDATE room_passwords
+                SET salt = ?, password_hash = ?, recovery_hash = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE room = ?
+                """,
+                (
+                    new_salt,
+                    self._hash_secret(new_salt, new_password),
+                    self._hash_secret(new_salt, recovery_word),
+                    room,
+                ),
+            )
+        return "ok"
 
     def get_room_control_target(self, control_room: str) -> str | None:
         """이 방에 설정된 방 단위 관리 대상(가장 최근 설정)을 돌려준다."""

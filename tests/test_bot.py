@@ -249,6 +249,110 @@ def test_admin_web_rename_room(tmp_path, monkeypatch) -> None:
     assert test_bot.admin_store.get_custom_command("새방", "공지").response == "내용"
 
 
+def test_room_password_gates_web_edits(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    test_bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    monkeypatch.setattr(main_module, "bot", test_bot)
+    monkeypatch.setenv("BRIDGE_KEY", "admin-secret")
+    client = TestClient(main_module.app)
+    auth = {"X-Bridge-Key": "admin-secret"}
+
+    # 비밀번호가 없는 방은 기존처럼 자유롭게 저장된다.
+    free = client.post(
+        "/admin/command",
+        headers=auth,
+        json={"room": "자유방", "command": "공지", "response": "내용"},
+    )
+    assert free.status_code == 200
+
+    # 비밀번호 설정 (4자 미만 거절, 정상 설정, 중복 설정 거절)
+    short = client.post(
+        "/admin/room-password",
+        headers=auth,
+        json={"room": "보호방", "password": "12", "recovery_word": "포켓몬"},
+    )
+    assert short.status_code == 400
+
+    ok = client.post(
+        "/admin/room-password",
+        headers=auth,
+        json={"room": "보호방", "password": "네자리비번", "recovery_word": "피카츄최고"},
+    )
+    assert ok.status_code == 200
+
+    dup = client.post(
+        "/admin/room-password",
+        headers=auth,
+        json={"room": "보호방", "password": "다른비번", "recovery_word": "다른단어"},
+    )
+    assert dup.status_code == 409
+
+    # 비밀번호 없이/틀리게 저장하면 403
+    blocked = client.post(
+        "/admin/command",
+        headers=auth,
+        json={"room": "보호방", "command": "공지", "response": "내용"},
+    )
+    assert blocked.status_code == 403
+    assert "방 비밀번호" in blocked.json()["detail"]
+
+    wrong = client.post(
+        "/admin/command",
+        headers=auth,
+        json={"room": "보호방", "command": "공지", "response": "내용", "room_password": "틀림"},
+    )
+    assert wrong.status_code == 403
+
+    saved = client.post(
+        "/admin/command",
+        headers=auth,
+        json={"room": "보호방", "command": "공지", "response": "내용", "room_password": "네자리비번"},
+    )
+    assert saved.status_code == 200
+
+    # 삭제도 비밀번호가 필요하다.
+    del_blocked = client.delete(
+        "/admin/command",
+        headers=auth,
+        params={"room": "보호방", "command": "공지"},
+    )
+    assert del_blocked.status_code == 403
+
+    # 복구 단어가 틀리면 변경 불가, 맞으면 변경된다.
+    bad_change = client.post(
+        "/admin/room-password/change",
+        headers=auth,
+        json={"room": "보호방", "recovery_word": "엉뚱단어", "new_password": "새비번1234"},
+    )
+    assert bad_change.status_code == 403
+
+    changed = client.post(
+        "/admin/room-password/change",
+        headers=auth,
+        json={"room": "보호방", "recovery_word": "피카츄최고", "new_password": "새비번1234"},
+    )
+    assert changed.status_code == 200
+
+    del_ok = client.delete(
+        "/admin/command",
+        headers=auth,
+        params={"room": "보호방", "command": "공지", "password": "새비번1234"},
+    )
+    assert del_ok.status_code == 200
+
+    # 설정된 적 없는 방의 변경 시도는 404
+    no_pw = client.post(
+        "/admin/room-password/change",
+        headers=auth,
+        json={"room": "자유방", "recovery_word": "x", "new_password": "새비번1234"},
+    )
+    assert no_pw.status_code == 404
+
+
 def test_command_stays_open_without_bridge_key(monkeypatch) -> None:
     monkeypatch.delenv("BRIDGE_KEY", raising=False)
     client = TestClient(app)

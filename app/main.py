@@ -307,11 +307,33 @@ class AdminCommandRequest(BaseModel):
     command: str
     response: str
     sender: str = "웹관리"
+    room_password: str = ""
 
 
 class RenameRoomRequest(BaseModel):
     old_room: str
     new_room: str
+    room_password: str = ""
+
+
+class RoomPasswordSetRequest(BaseModel):
+    room: str
+    password: str
+    recovery_word: str
+
+
+class RoomPasswordChangeRequest(BaseModel):
+    room: str
+    recovery_word: str
+    new_password: str
+
+
+def _require_room_password(room: str, password: str) -> None:
+    """방 비밀번호가 설정돼 있으면 일치할 때만 통과시킨다."""
+    if not bot.admin_store.has_room_password(room):
+        return
+    if not password or not bot.admin_store.check_room_password(room, password):
+        raise HTTPException(status_code=403, detail="방 비밀번호가 올바르지 않습니다.")
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -334,12 +356,17 @@ async def admin_list_commands(room: str) -> list[dict[str, Any]]:
 
 
 @app.delete("/admin/command", dependencies=[Depends(_verify_bridge_key)])
-async def admin_delete_command(room: str, command: str) -> dict[str, Any]:
+async def admin_delete_command(
+    room: str,
+    command: str,
+    password: str = "",
+) -> dict[str, Any]:
     normalized = PokemonGoBot._normalize_custom_command(command)
     clean_room = normalize_room(room)
     if not clean_room or not normalized:
         raise HTTPException(status_code=400, detail="방과 명령어 이름을 입력해 주세요.")
 
+    _require_room_password(clean_room, password)
     deleted = bot.admin_store.delete_custom_command(clean_room, normalized)
     if not deleted:
         raise HTTPException(
@@ -368,8 +395,47 @@ async def admin_save_command(request: AdminCommandRequest) -> dict[str, Any]:
     if normalized in PokemonGoBot._reserved_custom_commands():
         raise HTTPException(status_code=400, detail=f"'{normalized}'는 봇 기본 명령어라 사용할 수 없습니다.")
 
+    _require_room_password(room, request.room_password)
     bot.admin_store.upsert_custom_command(room, normalized, response, request.sender)
     return {"ok": True, "command": normalized, "length": len(response)}
+
+
+@app.post("/admin/room-password", dependencies=[Depends(_verify_bridge_key)])
+async def admin_set_room_password(request: RoomPasswordSetRequest) -> dict[str, Any]:
+    room = normalize_room(request.room)
+    password = request.password.strip()
+    recovery_word = request.recovery_word.strip()
+    if not room or not password or not recovery_word:
+        raise HTTPException(status_code=400, detail="방, 비밀번호, 복구 단어를 모두 입력해 주세요.")
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail="비밀번호는 4자 이상으로 해주세요.")
+
+    if not bot.admin_store.set_room_password(room, password, recovery_word):
+        raise HTTPException(
+            status_code=409,
+            detail="이미 비밀번호가 설정된 방입니다. 변경은 복구 단어로 해주세요.",
+        )
+    return {"ok": True}
+
+
+@app.post("/admin/room-password/change", dependencies=[Depends(_verify_bridge_key)])
+async def admin_change_room_password(
+    request: RoomPasswordChangeRequest,
+) -> dict[str, Any]:
+    room = normalize_room(request.room)
+    recovery_word = request.recovery_word.strip()
+    new_password = request.new_password.strip()
+    if not room or not recovery_word or not new_password:
+        raise HTTPException(status_code=400, detail="방, 복구 단어, 새 비밀번호를 모두 입력해 주세요.")
+    if len(new_password) < 4:
+        raise HTTPException(status_code=400, detail="비밀번호는 4자 이상으로 해주세요.")
+
+    result = bot.admin_store.change_room_password(room, recovery_word, new_password)
+    if result == "missing":
+        raise HTTPException(status_code=404, detail="이 방에는 설정된 비밀번호가 없습니다. 먼저 설정해 주세요.")
+    if result == "wrong":
+        raise HTTPException(status_code=403, detail="복구 단어가 올바르지 않습니다.")
+    return {"ok": True}
 
 
 @app.post("/admin/rename-room", dependencies=[Depends(_verify_bridge_key)])
@@ -381,6 +447,7 @@ async def admin_rename_room(request: RenameRoomRequest) -> dict[str, Any]:
     if old_room == new_room:
         raise HTTPException(status_code=400, detail="두 이름이 같습니다.")
 
+    _require_room_password(old_room, request.room_password)
     moved = bot.admin_store.migrate_room(old_room, new_room)
     return {"ok": True, **moved}
 
