@@ -159,6 +159,26 @@ def test_admin_web_saves_long_command(tmp_path, monkeypatch) -> None:
     )
     assert reserved.status_code == 400
 
+    listed = client.get("/admin/commands", headers=auth, params={"room": "종합방"})
+    assert listed.json() == [{"command": "이벤", "length": len(long_text)}]
+
+    missing = client.delete(
+        "/admin/command",
+        headers=auth,
+        params={"room": "종합방", "command": "없는거"},
+    )
+    assert missing.status_code == 404
+    assert "삭제할 명령어가 없습니다" in missing.json()["detail"]
+
+    deleted = client.delete(
+        "/admin/command",
+        headers=auth,
+        params={"room": "종합방", "command": "/이벤"},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json() == {"ok": True, "command": "이벤"}
+    assert test_bot.admin_store.get_custom_command("종합방", "이벤") is None
+
 
 def test_migrate_room_moves_and_merges_data(tmp_path) -> None:
     from app.admin_store import ChatUser

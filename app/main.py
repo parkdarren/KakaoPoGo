@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
+from app.admin_page import ADMIN_PAGE
 from app.bot import PokemonGoBot, parse_command
 from app.pogo_api import PogoApiClient, format_dex_reply
 
@@ -313,163 +314,6 @@ class RenameRoomRequest(BaseModel):
     new_room: str
 
 
-ADMIN_PAGE = """<!doctype html>
-<html lang="ko">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KakaoPoGo 명령어 관리</title>
-<style>
-  body { font-family: sans-serif; max-width: 560px; margin: 0 auto; padding: 16px; }
-  h1 { font-size: 1.2rem; }
-  label { display: block; margin-top: 12px; font-weight: bold; font-size: 0.9rem; }
-  input, textarea, select { width: 100%; box-sizing: border-box; padding: 8px;
-    margin-top: 4px; font-size: 1rem; border: 1px solid #bbb; border-radius: 6px; }
-  textarea { min-height: 260px; }
-  button { margin-top: 14px; padding: 10px 18px; font-size: 1rem; border: 0;
-    border-radius: 6px; background: #3c1e1e; color: #fee500; font-weight: bold; }
-  button.secondary { background: #eee; color: #333; margin-left: 8px; }
-  #status { margin-top: 12px; white-space: pre-wrap; font-size: 0.95rem; }
-  #count { font-weight: normal; color: #666; font-size: 0.85rem; }
-</style>
-</head>
-<body>
-<h1>🤖 KakaoPoGo 명령어 관리</h1>
-<p>카톡 알림 길이 제한 없이 긴 내용을 한 번에 등록/수정합니다.</p>
-
-<label>관리 키</label>
-<input id="key" type="password" placeholder="BRIDGE_KEY 값">
-
-<label>방 이름 (목록에서 선택하세요 — 직접 입력하면 보이지 않는 문자 차이로 다른 방이 될 수 있어요)</label>
-<select id="roomSelect">
-  <option value="">키를 입력하면 방 목록이 나옵니다</option>
-</select>
-<input id="room" placeholder="새 방 이름 (봇 로그와 정확히 같아야 함)"
-  style="display:none; margin-top:6px">
-<datalist id="rooms"></datalist>
-
-<label>명령어 이름 (/ 없이)</label>
-<input id="command" placeholder="예: 이벤">
-
-<label>내용 <span id="count"></span></label>
-<textarea id="response" placeholder="명령어 응답 내용 전체를 붙여넣으세요"></textarea>
-
-<button onclick="save()">저장</button>
-<button class="secondary" onclick="load()">기존 내용 불러오기</button>
-<div id="status"></div>
-
-<details style="margin-top:28px">
-<summary>🏷️ 방 이름 변경 이전 (방 제목이 바뀌었을 때만 사용)</summary>
-<p style="font-size:0.85rem;color:#666">카톡방 제목이 바뀌면 봇이 새로운 방으로
-인식해 명령어·관리자·출석이 끊깁니다. 옛 이름의 데이터를 새 이름으로 옮깁니다.</p>
-<label>옛 방 이름</label>
-<input id="oldRoom" list="rooms" placeholder="바뀌기 전 방 제목">
-<label>새 방 이름</label>
-<input id="newRoom" placeholder="바뀐 후 방 제목 (정확히)">
-<button onclick="renameRoom()">이전 실행</button>
-<div id="renameStatus"></div>
-</details>
-
-<script>
-const $ = (id) => document.getElementById(id);
-// 관리방에 공유하는 전용 링크(/admin#key=...)로 열면 키가 자동 입력된다.
-// 키를 페이지에 직접 심지 않는 이유: 링크 없이 주소만 아는 외부인에게
-// 봇 전체 제어 키가 노출되면 안 되기 때문.
-const hashKey = new URLSearchParams(location.hash.slice(1)).get("key");
-if (hashKey) {
-  localStorage.setItem("kpg-key", hashKey);
-  history.replaceState(null, "", location.pathname);
-}
-$("key").value = localStorage.getItem("kpg-key") || "";
-$("response").addEventListener("input", () => {
-  $("count").textContent = "(" + $("response").value.length + "자)";
-});
-
-function currentRoom() {
-  if ($("roomSelect").value === "__custom__") return $("room").value.trim();
-  return $("roomSelect").value;
-}
-
-$("roomSelect").addEventListener("change", () => {
-  $("room").style.display = $("roomSelect").value === "__custom__" ? "block" : "none";
-  localStorage.setItem("kpg-room", currentRoom());
-});
-
-function headers() {
-  localStorage.setItem("kpg-key", $("key").value);
-  return { "X-Bridge-Key": $("key").value, "Content-Type": "application/json" };
-}
-
-async function refreshRooms() {
-  if (!$("key").value) return;
-  const res = await fetch("/admin/rooms", { headers: headers() });
-  if (!res.ok) return;
-  const rooms = await res.json();
-  const saved = localStorage.getItem("kpg-room") || "";
-  $("roomSelect").innerHTML =
-    rooms.map((r) => `<option value="${r}">${r}</option>`).join("") +
-    `<option value="__custom__">＋ 새 방 이름 직접 입력</option>`;
-  if (rooms.includes(saved)) $("roomSelect").value = saved;
-  $("rooms").innerHTML = rooms.map((r) => `<option value="${r}">`).join("");
-}
-$("key").addEventListener("change", refreshRooms);
-refreshRooms();
-
-async function load() {
-  if (!currentRoom()) return show("방을 먼저 선택해 주세요.");
-  const params = new URLSearchParams({ room: currentRoom(), command: $("command").value });
-  const res = await fetch("/admin/command?" + params, { headers: headers() });
-  if (res.status === 403) return show("❌ 관리 키가 올바르지 않습니다.");
-  const data = await res.json();
-  if (!data.found) return show("등록되지 않은 명령어입니다. 저장하면 새로 만듭니다.");
-  $("response").value = data.response;
-  $("count").textContent = "(" + data.response.length + "자)";
-  show("✅ 불러왔습니다. 수정 후 저장하세요.");
-}
-
-async function save() {
-  if (!currentRoom()) return show("방을 먼저 선택해 주세요.");
-  const res = await fetch("/admin/command", {
-    method: "POST",
-    headers: headers(),
-    body: JSON.stringify({
-      room: currentRoom(),
-      command: $("command").value,
-      response: $("response").value,
-    }),
-  });
-  if (res.status === 403) return show("❌ 관리 키가 올바르지 않습니다.");
-  const data = await res.json();
-  if (!res.ok) return show("❌ " + (data.detail || "저장 실패"));
-  show(`✅ /${data.command} 저장 완료 (${data.length}자)`);
-  refreshRooms();
-}
-
-function show(msg) { $("status").textContent = msg; }
-
-async function renameRoom() {
-  const oldRoom = $("oldRoom").value.trim();
-  const newRoom = $("newRoom").value.trim();
-  const out = (msg) => { $("renameStatus").textContent = msg; };
-  if (!oldRoom || !newRoom) return out("옛 이름과 새 이름을 모두 입력해 주세요.");
-  if (oldRoom === newRoom) return out("두 이름이 같습니다.");
-  if (!confirm(`'${oldRoom}'\\n→ '${newRoom}'\\n\\n이 방의 명령어·관리자·출석 기록을 모두 옮길까요?`)) return;
-  const res = await fetch("/admin/rename-room", {
-    method: "POST",
-    headers: headers(),
-    body: JSON.stringify({ old_room: oldRoom, new_room: newRoom }),
-  });
-  if (res.status === 403) return out("❌ 관리 키가 올바르지 않습니다.");
-  const data = await res.json();
-  if (!res.ok) return out("❌ " + (data.detail || "이전 실패"));
-  out(`✅ 이전 완료 — 명령어 ${data.custom_commands}개, 관리자 ${data.room_admins}명, 출석 ${data.attendance}건`);
-  refreshRooms();
-}
-</script>
-</body>
-</html>"""
-
-
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page() -> str:
     return ADMIN_PAGE
@@ -478,6 +322,30 @@ async def admin_page() -> str:
 @app.get("/admin/rooms", dependencies=[Depends(_verify_bridge_key)])
 async def admin_rooms() -> list[str]:
     return bot.admin_store.list_custom_rooms()
+
+
+@app.get("/admin/commands", dependencies=[Depends(_verify_bridge_key)])
+async def admin_list_commands(room: str) -> list[dict[str, Any]]:
+    records = bot.admin_store.list_custom_command_records(room.strip())
+    return [
+        {"command": record.display_command, "length": len(record.response)}
+        for record in records
+    ]
+
+
+@app.delete("/admin/command", dependencies=[Depends(_verify_bridge_key)])
+async def admin_delete_command(room: str, command: str) -> dict[str, Any]:
+    normalized = PokemonGoBot._normalize_custom_command(command)
+    if not room.strip() or not normalized:
+        raise HTTPException(status_code=400, detail="방과 명령어 이름을 입력해 주세요.")
+
+    deleted = bot.admin_store.delete_custom_command(room.strip(), normalized)
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"'/{normalized}' — 삭제할 명령어가 없습니다. 이름을 확인해 주세요.",
+        )
+    return {"ok": True, "command": normalized}
 
 
 @app.get("/admin/command", dependencies=[Depends(_verify_bridge_key)])
