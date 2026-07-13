@@ -106,6 +106,16 @@ class AdminStore:
                     points INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (room, user_key)
                 );
+
+                CREATE TABLE IF NOT EXISTS raid_signups (
+                    room TEXT NOT NULL,
+                    pokemon_key TEXT NOT NULL,
+                    pokemon_display TEXT NOT NULL,
+                    nickname_key TEXT NOT NULL,
+                    nickname TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (room, pokemon_key, nickname_key)
+                );
                 """
             )
             self._ensure_column(conn, "custom_commands", "display_command", "TEXT")
@@ -252,6 +262,100 @@ class AdminStore:
                 (user.room, user.user_key, user.sender, today, total_days, points),
             )
             return total_days, points, True
+
+    def add_raid_signup(
+        self,
+        room: str,
+        pokemon_key: str,
+        pokemon_display: str,
+        nickname: str,
+    ) -> tuple[bool, int]:
+        """레이드 명단에 닉네임을 올린다. (새로 등록됐는지, 현재 인원)을 돌려준다."""
+        nickname_key = nickname.lower()
+        with self._connect() as conn:
+            existing = conn.execute(
+                """
+                SELECT 1 FROM raid_signups
+                WHERE room = ? AND pokemon_key = ? AND nickname_key = ?
+                """,
+                (room, pokemon_key, nickname_key),
+            ).fetchone()
+            if not existing:
+                conn.execute(
+                    """
+                    INSERT INTO raid_signups
+                        (room, pokemon_key, pokemon_display, nickname_key, nickname)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (room, pokemon_key, pokemon_display, nickname_key, nickname),
+                )
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM raid_signups WHERE room = ? AND pokemon_key = ?",
+                (room, pokemon_key),
+            ).fetchone()["n"]
+        return existing is None, count
+
+    def remove_raid_signup(
+        self,
+        room: str,
+        pokemon_key: str,
+        nickname: str,
+    ) -> tuple[bool, int]:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM raid_signups
+                WHERE room = ? AND pokemon_key = ? AND nickname_key = ?
+                """,
+                (room, pokemon_key, nickname.lower()),
+            )
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM raid_signups WHERE room = ? AND pokemon_key = ?",
+                (room, pokemon_key),
+            ).fetchone()["n"]
+        return cursor.rowcount > 0, count
+
+    def list_raid_signups(self, room: str, pokemon_key: str) -> tuple[str, list[str]]:
+        """(표시용 포켓몬 이름, 닉네임 목록)을 돌려준다. 닉네임은 정렬돼 있다."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT pokemon_display, nickname FROM raid_signups
+                WHERE room = ? AND pokemon_key = ?
+                """,
+                (room, pokemon_key),
+            ).fetchall()
+        if not rows:
+            return "", []
+        nicknames = sorted((row["nickname"] for row in rows), key=str.lower)
+        return rows[0]["pokemon_display"], nicknames
+
+    def list_raid_rosters(self, room: str) -> list[tuple[str, int]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT pokemon_display, COUNT(*) AS n
+                FROM raid_signups
+                WHERE room = ?
+                GROUP BY pokemon_key
+                ORDER BY MIN(created_at)
+                """,
+                (room,),
+            ).fetchall()
+        return [(row["pokemon_display"], row["n"]) for row in rows]
+
+    def clear_raid_signups(self, room: str, pokemon_key: str | None = None) -> int:
+        with self._connect() as conn:
+            if pokemon_key is None:
+                cursor = conn.execute(
+                    "DELETE FROM raid_signups WHERE room = ?", (room,)
+                )
+            else:
+                cursor = conn.execute(
+                    "DELETE FROM raid_signups WHERE room = ? AND pokemon_key = ?",
+                    (room, pokemon_key),
+                )
+            return cursor.rowcount
 
     def get_room_control_target(self, control_room: str) -> str | None:
         """이 방에 설정된 방 단위 관리 대상(가장 최근 설정)을 돌려준다."""

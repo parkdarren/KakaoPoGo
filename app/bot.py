@@ -123,7 +123,15 @@ BUILTIN_HELP_ENTRIES = [
         "/출석랭킹",
         "이 방의 출석 순위를 상위 10명까지 보여줍니다.",
     ),
+    (
+        "/레이드참가 닉네임 포켓몬이름",
+        "레이드 초대 명단에 등록합니다. 닉네임은 게임 닉네임으로!\n"
+        "예시 : /레이드참가 DongDoro 오리진디아루가\n"
+        "취소 : /레이드참가취소 닉네임 포켓몬이름\n"
+        "명단 : /레이드명단 포켓몬이름 (10명씩 팟 자동 배정)",
+    ),
 ]
+RAID_PARTY_SIZE = 10
 ADMIN_COMMANDS = [
     "/대상방설정 공개방이름",
     "/대상방확인",
@@ -186,6 +194,14 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "attendance_ranking", query
     if command in ("접기테스트",):
         return "fold_test", query
+    if command in ("레이드참가",):
+        return "raid_join", query
+    if command in ("레이드참가취소", "레이드빠짐"):
+        return "raid_leave", query
+    if command in ("레이드명단", "레이드목록"):
+        return "raid_list", query
+    if command in ("레이드초기화",):
+        return "raid_clear", query
     if command in ("오너등록", "owner"):
         return "owner_setup", query
     if command in ("관리자요청",):
@@ -283,6 +299,18 @@ class PokemonGoBot:
 
         if command == "fold_test":
             return BotResponse(self._handle_fold_test(query))
+
+        if command == "raid_join":
+            return BotResponse(self._handle_raid_join(user, query))
+
+        if command == "raid_leave":
+            return BotResponse(self._handle_raid_leave(user, query))
+
+        if command == "raid_list":
+            return BotResponse(self._handle_raid_list(user, query))
+
+        if command == "raid_clear":
+            return BotResponse(self._handle_raid_clear(user, query))
 
         if command == "events":
             try:
@@ -556,6 +584,92 @@ class PokemonGoBot:
             lines.append(f"오늘은 이미 출석했어요. (누적 {total_days}일)")
         lines.append(f"보유 포인트: {points}P")
         return "\n".join(lines)
+
+    @staticmethod
+    def _parse_raid_query(query: str) -> tuple[str, str, str] | None:
+        """'닉네임 포켓몬이름...'을 (닉네임, 포켓몬키, 포켓몬표시명)으로 나눈다."""
+        parts = query.strip().split(maxsplit=1)
+        if len(parts) != 2:
+            return None
+        nickname, pokemon_display = parts[0], parts[1].strip()
+        pokemon_key = pokemon_display.lower().replace(" ", "")
+        if not nickname or not pokemon_key:
+            return None
+        return nickname, pokemon_key, pokemon_display
+
+    def _handle_raid_join(self, user: ChatUser, query: str) -> str:
+        parsed = self._parse_raid_query(query)
+        if parsed is None:
+            return (
+                "형식은 이렇게 입력해 주세요.\n"
+                "/레이드참가 게임닉네임 포켓몬이름\n"
+                "예: /레이드참가 DongDoro 오리진디아루가"
+            )
+        nickname, pokemon_key, pokemon_display = parsed
+        added, count = self.admin_store.add_raid_signup(
+            user.room, pokemon_key, pokemon_display, nickname
+        )
+        if not added:
+            return f"'{nickname}' 님은 이미 {pokemon_display} 명단에 있어요. (현재 {count}명)"
+        return f"✅ {pokemon_display} 레이드에 '{nickname}' 등록! (현재 {count}명)"
+
+    def _handle_raid_leave(self, user: ChatUser, query: str) -> str:
+        parsed = self._parse_raid_query(query)
+        if parsed is None:
+            return (
+                "형식은 이렇게 입력해 주세요.\n"
+                "/레이드참가취소 게임닉네임 포켓몬이름"
+            )
+        nickname, pokemon_key, pokemon_display = parsed
+        removed, count = self.admin_store.remove_raid_signup(
+            user.room, pokemon_key, nickname
+        )
+        if not removed:
+            return f"'{nickname}' 님은 {pokemon_display} 명단에 없어요."
+        return f"{pokemon_display} 명단에서 '{nickname}' 을(를) 뺐어요. (현재 {count}명)"
+
+    def _handle_raid_list(self, user: ChatUser, query: str) -> str:
+        pokemon_query = query.strip()
+        if not pokemon_query:
+            rosters = self.admin_store.list_raid_rosters(user.room)
+            if not rosters:
+                return "진행 중인 레이드 명단이 없어요. /레이드참가 닉네임 포켓몬이름 으로 시작!"
+            lines = ["📋 레이드 명단 현황"]
+            for pokemon_display, count in rosters:
+                lines.append(f"- {pokemon_display}: {count}명")
+            lines.append("자세히: /레이드명단 포켓몬이름")
+            return "\n".join(lines)
+
+        pokemon_key = pokemon_query.lower().replace(" ", "")
+        pokemon_display, nicknames = self.admin_store.list_raid_signups(
+            user.room, pokemon_key
+        )
+        if not nicknames:
+            return f"'{pokemon_query}' 레이드 명단이 비어 있어요."
+
+        lines = [f"📋 {pokemon_display} 레이드 명단 — 총 {len(nicknames)}명"]
+        for start in range(0, len(nicknames), RAID_PARTY_SIZE):
+            party = nicknames[start : start + RAID_PARTY_SIZE]
+            party_number = start // RAID_PARTY_SIZE + 1
+            lines.append(f"{party_number}팟({len(party)}명): {', '.join(party)}")
+        return "\n".join(lines)
+
+    def _handle_raid_clear(self, user: ChatUser, query: str) -> str:
+        if not self.admin_store.is_admin_or_owner(user):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+
+        target = query.strip()
+        if not target:
+            return "초기화할 포켓몬 이름을 입력해 주세요. 예: /레이드초기화 오리진디아루가 (전체: /레이드초기화 전체)"
+        if target == "전체":
+            cleared = self.admin_store.clear_raid_signups(user.room)
+            return f"레이드 명단 전체를 초기화했어요. ({cleared}명 삭제)"
+
+        pokemon_key = target.lower().replace(" ", "")
+        cleared = self.admin_store.clear_raid_signups(user.room, pokemon_key)
+        if cleared == 0:
+            return f"'{target}' 레이드 명단이 이미 비어 있어요."
+        return f"{target} 레이드 명단을 초기화했어요. ({cleared}명 삭제)"
 
     @staticmethod
     def _handle_fold_test(query: str) -> str:
@@ -869,6 +983,12 @@ class PokemonGoBot:
             "출석랭킹",
             "출첵랭킹",
             "접기테스트",
+            "레이드참가",
+            "레이드참가취소",
+            "레이드빠짐",
+            "레이드명단",
+            "레이드목록",
+            "레이드초기화",
             "오너등록",
             "owner",
             "관리자요청",

@@ -934,6 +934,56 @@ async def test_long_custom_reply_is_folded_and_fold_test_pads(tmp_path) -> None:
 
 
 @pytest.mark.anyio
+async def test_raid_signup_roster_and_party_split(tmp_path) -> None:
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="회장")
+
+    bad = await bot.handle("/레이드참가 닉네임만", room="레이드방", sender="일반")
+    assert "형식은 이렇게" in bad.reply
+
+    first = await bot.handle(
+        "/레이드참가 DongDoro 오리진 디아루가", room="레이드방", sender="일반"
+    )
+    assert first.reply == "✅ 오리진 디아루가 레이드에 'DongDoro' 등록! (현재 1명)"
+
+    duplicate = await bot.handle(
+        "/레이드참가 dongdoro 오리진디아루가", room="레이드방", sender="일반"
+    )
+    assert "이미" in duplicate.reply  # 대소문자/띄어쓰기 달라도 같은 사람·같은 레이드
+
+    # 12명을 채워 팟이 나뉘는지 확인 (기존 1명 + 11명)
+    for index in range(11):
+        await bot.handle(
+            f"/레이드참가 유저{index:02d} 오리진디아루가", room="레이드방", sender="일반"
+        )
+
+    roster = await bot.handle("/레이드명단 오리진디아루가", room="레이드방", sender="회장")
+    lines = roster.reply.split("\n")
+    assert lines[0] == "📋 오리진 디아루가 레이드 명단 — 총 12명"
+    assert lines[1].startswith("1팟(10명): DongDoro, 유저00")
+    assert lines[2].startswith("2팟(2명): 유저09, 유저10")
+
+    summary = await bot.handle("/레이드명단", room="레이드방", sender="회장")
+    assert "- 오리진 디아루가: 12명" in summary.reply
+
+    left = await bot.handle(
+        "/레이드참가취소 DongDoro 오리진디아루가", room="레이드방", sender="일반"
+    )
+    assert "'DongDoro' 을(를) 뺐어요. (현재 11명)" in left.reply
+
+    denied = await bot.handle("/레이드초기화 전체", room="레이드방", sender="일반")
+    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+
+    cleared = await bot.handle("/레이드초기화 오리진디아루가", room="레이드방", sender="회장")
+    assert "(11명 삭제)" in cleared.reply
+    empty = await bot.handle("/레이드명단 오리진디아루가", room="레이드방", sender="회장")
+    assert "비어 있어요" in empty.reply
+
+
+@pytest.mark.anyio
 async def test_custom_append_extends_existing_command(tmp_path) -> None:
     bot = PokemonGoBot(
         admin_store=AdminStore(tmp_path / "test.sqlite3"),
