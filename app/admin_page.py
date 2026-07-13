@@ -8,136 +8,191 @@ ADMIN_PAGE = """<!doctype html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#c11f04">
 <title>포고정보 관리자</title>
 <style>
   :root {
-    --red: #ee4035;
-    --red-dark: #c62828;
-    --yellow: #ffcb05;
-    --blue: #3b4cca;
-    --ink: #26262a;
-    --paper: #f6f7fb;
+    --red: #e3350d;
+    --red-deep: #c11f04;
+    --ink: #23252f;
+    --bg: #eef0f5;
     --card: #ffffff;
-    --line: #e6e8f0;
-    --muted: #8a8f9e;
+    --field: #f1f2f7;
+    --line: #e7e9f2;
+    --muted: #9094a6;
+    --label: #6b7080;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { background: var(--bg); }
   body {
-    font-family: "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
-    background: var(--paper); color: var(--ink);
-    max-width: 560px; margin: 0 auto; padding: 14px 14px 40px;
+    font-family: "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif;
+    background:
+      radial-gradient(circle at 90% -80px, rgba(227, 53, 13, 0.07), transparent 340px),
+      var(--bg);
+    color: var(--ink);
+    max-width: 560px; margin: 0 auto;
+    padding: 16px 16px calc(44px + env(safe-area-inset-bottom));
   }
-  header { display: flex; align-items: center; gap: 12px; padding: 10px 4px 16px; }
-  .pokeball {
-    width: 40px; height: 40px; border-radius: 50%; flex: none;
-    background: linear-gradient(var(--red) 0 44%, var(--ink) 44% 56%, #fff 56% 100%);
-    border: 2px solid var(--ink); position: relative;
-    animation: wiggle 4s ease-in-out infinite;
+
+  .hero {
+    position: relative; overflow: hidden;
+    background: linear-gradient(140deg, #ef5533 0%, var(--red-deep) 78%);
+    border-radius: 22px; padding: 22px 20px 20px; color: #fff;
+    box-shadow: 0 12px 28px rgba(227, 53, 13, 0.28);
+    margin-bottom: 16px;
   }
-  .pokeball::after {
-    content: ""; position: absolute; top: 50%; left: 50%;
-    width: 12px; height: 12px; border-radius: 50%;
-    background: #fff; border: 3px solid var(--ink);
-    transform: translate(-50%, -50%);
+  .hero::before {
+    content: ""; position: absolute; right: -44px; top: -44px;
+    width: 164px; height: 164px; border-radius: 50%;
+    border: 16px solid rgba(255, 255, 255, 0.13);
   }
-  @keyframes wiggle {
-    0%, 88%, 100% { transform: rotate(0); }
-    90% { transform: rotate(-12deg); }
-    94% { transform: rotate(10deg); }
-    97% { transform: rotate(-6deg); }
+  .hero::after {
+    content: ""; position: absolute; right: 24px; top: 24px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.16);
+    border: 7px solid rgba(255, 255, 255, 0.22);
   }
-  header h1 { font-size: 1.15rem; margin: 0; }
-  header p { font-size: 0.8rem; color: var(--muted); margin: 2px 0 0; }
+  .hero .badge {
+    display: inline-block; background: rgba(255, 255, 255, 0.18);
+    border-radius: 999px; padding: 4px 11px; font-size: 0.7rem;
+    font-weight: 700; letter-spacing: 0.06em; margin-bottom: 10px;
+  }
+  .hero h1 { margin: 0; font-size: 1.34rem; font-weight: 800; letter-spacing: -0.02em; }
+  .hero p { margin: 7px 0 0; font-size: 0.82rem; opacity: 0.88; line-height: 1.45; }
+
   .card {
-    background: var(--card); border: 1px solid var(--line);
-    border-radius: 16px; padding: 16px; margin-bottom: 14px;
-    box-shadow: 0 2px 10px rgba(38, 38, 42, 0.05);
+    background: var(--card); border-radius: 20px; padding: 18px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 2px rgba(23, 26, 38, 0.04), 0 10px 26px rgba(23, 26, 38, 0.06);
   }
-  .card h2 { font-size: 0.95rem; margin: 0 0 10px; }
-  label { display: block; margin-top: 12px; font-weight: 600; font-size: 0.85rem; }
-  label:first-of-type { margin-top: 0; }
-  .hint { font-size: 0.78rem; color: var(--muted); margin: 6px 0 0; }
+  .card h2 {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 0.98rem; font-weight: 800; margin: 0 0 4px;
+  }
+  .card h2 .dot {
+    width: 10px; height: 10px; border-radius: 50%; flex: none;
+    background: var(--red); box-shadow: 0 0 0 4px rgba(227, 53, 13, 0.12);
+  }
+
+  label {
+    display: block; margin: 15px 0 6px; font-weight: 700;
+    font-size: 0.78rem; color: var(--label); letter-spacing: 0.02em;
+  }
+  .hint { font-size: 0.78rem; color: var(--muted); margin: 8px 0 0; line-height: 1.5; }
   input, textarea, select {
-    width: 100%; padding: 10px 12px; margin-top: 6px; font-size: 0.95rem;
-    border: 1.5px solid var(--line); border-radius: 10px; background: #fff;
-    font-family: inherit;
+    width: 100%; padding: 12px 14px; font-size: 0.95rem;
+    background: var(--field); color: var(--ink);
+    border: 1.5px solid transparent; border-radius: 14px;
+    font-family: inherit; transition: border-color 0.15s, background 0.15s;
+    appearance: none; -webkit-appearance: none;
+  }
+  select {
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239094a6' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 14px center;
+    padding-right: 36px;
   }
   input:focus, textarea:focus, select:focus {
-    outline: none; border-color: var(--blue);
+    outline: none; background: #fff; border-color: var(--red);
   }
-  textarea { min-height: 220px; line-height: 1.45; }
-  .cmdrow { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  textarea { min-height: 240px; line-height: 1.5; border-radius: 16px; }
+
+  .cmdrow { display: flex; align-items: stretch; gap: 8px; }
   .cmdrow .slash {
-    font-weight: 800; font-size: 1.1rem; color: var(--red);
-    background: #fdecea; border-radius: 8px; padding: 8px 12px;
+    display: flex; align-items: center; flex: none;
+    background: var(--ink); color: #fff; border-radius: 14px;
+    padding: 0 15px; font-weight: 800; font-size: 1.05rem;
   }
-  .cmdrow input { margin-top: 0; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-  .chip {
-    border: 1.5px solid var(--line); background: #fff; border-radius: 999px;
-    padding: 6px 12px; font-size: 0.82rem; cursor: pointer; color: var(--ink);
-  }
-  .chip small { color: var(--muted); margin-left: 4px; }
-  .chip.active { border-color: var(--red); background: #fdecea; font-weight: 700; }
-  .btnrow { display: flex; gap: 8px; margin-top: 14px; }
+
+  .btnrow { display: flex; gap: 8px; margin-top: 16px; }
   button {
-    border: 0; border-radius: 10px; padding: 11px 14px; font-size: 0.92rem;
-    font-weight: 700; cursor: pointer; font-family: inherit;
+    border: 0; border-radius: 14px; padding: 13px 16px;
+    font-size: 0.93rem; font-weight: 800; cursor: pointer;
+    font-family: inherit; transition: transform 0.06s ease, filter 0.15s;
   }
-  .primary { background: var(--red); color: #fff; flex: 1; }
-  .primary:active { background: var(--red-dark); }
-  .ghost { background: #eef0f6; color: var(--ink); }
-  .danger { background: #fff; color: var(--red); border: 1.5px solid var(--red); }
-  .toast {
-    margin-top: 12px; padding: 0; border-radius: 10px; font-size: 0.88rem;
-    white-space: pre-wrap;
+  button:active { transform: scale(0.97); filter: brightness(0.96); }
+  .primary {
+    flex: 1; color: #fff;
+    background: linear-gradient(135deg, #ef5533, #d92c07);
+    box-shadow: 0 6px 16px rgba(227, 53, 13, 0.3);
   }
-  .toast.ok { background: #e8f5e9; color: #1b5e20; padding: 10px 12px; }
-  .toast.err { background: #fdecea; color: var(--red-dark); padding: 10px 12px; }
+  .ghost { background: #eceef4; color: #3a3d4d; }
+  .danger { background: transparent; color: var(--red-deep); border: 1.5px solid #f3c1b5; }
+  #cmdToggle { width: 100%; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: #fff; border: 1px solid var(--line); border-radius: 999px;
+    padding: 7px 13px; font-size: 0.82rem; font-weight: 600; color: var(--ink);
+    box-shadow: 0 1px 3px rgba(23, 26, 38, 0.05);
+  }
+  .chip small { color: var(--muted); font-weight: 500; }
+  .chip.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .chip.active small { color: rgba(255, 255, 255, 0.65); }
+
+  .toast { margin-top: 12px; font-size: 0.87rem; white-space: pre-wrap; border-radius: 13px; }
+  .toast.ok { background: #eaf7ee; color: #17724a; padding: 12px 14px; }
+  .toast.err { background: #fdeeec; color: var(--red-deep); padding: 12px 14px; }
+
   details summary {
-    cursor: pointer; font-weight: 700; font-size: 0.9rem; color: var(--muted);
+    cursor: pointer; font-weight: 800; font-size: 0.92rem;
+    color: var(--ink); list-style: none; display: flex; align-items: center; gap: 9px;
   }
-  footer { text-align: center; font-size: 0.75rem; color: var(--muted); margin-top: 18px; }
-  #count { font-weight: 400; color: var(--muted); font-size: 0.8rem; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before {
+    content: ""; width: 10px; height: 10px; border-radius: 50%; flex: none;
+    background: var(--muted); box-shadow: 0 0 0 4px rgba(144, 148, 166, 0.15);
+  }
+  details[open] summary::before { background: var(--red); box-shadow: 0 0 0 4px rgba(227, 53, 13, 0.12); }
+
+  footer {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    font-size: 0.74rem; color: var(--muted); margin-top: 22px;
+  }
+  footer .miniball {
+    width: 13px; height: 13px; border-radius: 50%; flex: none;
+    background: linear-gradient(var(--red) 0 44%, var(--ink) 44% 56%, #fff 56% 100%);
+    border: 1.5px solid var(--ink);
+  }
+  #count { font-weight: 500; color: var(--muted); font-size: 0.76rem; }
 </style>
 </head>
 <body>
-<header>
-  <div class="pokeball"></div>
-  <div>
-    <h1>포고정보 관리자</h1>
-    <p>카톡 길이 제한 없이 명령어를 등록·수정·삭제합니다</p>
-  </div>
+<header class="hero">
+  <span class="badge">KAKAOPOGO ADMIN</span>
+  <h1>포고정보 관리자</h1>
+  <p>카톡 길이 제한 없이 명령어를<br>등록 · 수정 · 삭제합니다</p>
 </header>
 
 <section class="card">
-  <h2>🔑 접속</h2>
-  <input id="key" type="password" placeholder="관리 키">
+  <h2><span class="dot"></span>접속</h2>
+  <label for="key">관리 키</label>
+  <input id="key" type="password" placeholder="관리 키를 입력하세요">
   <p class="hint">관리방에 공유된 링크로 들어왔다면 자동으로 채워져 있어요.</p>
 </section>
 
 <section class="card">
-  <h2>📋 명령어 관리</h2>
-  <label>방 선택</label>
+  <h2><span class="dot"></span>명령어 관리</h2>
+  <label for="roomSelect">방 선택</label>
   <select id="roomSelect">
     <option value="">키를 입력하면 방 목록이 나와요</option>
   </select>
   <input id="room" placeholder="새 방 이름 (봇이 보는 이름과 정확히 같아야 함)"
-    style="display:none">
+    style="display:none; margin-top:8px">
 
-  <div class="btnrow" style="margin-top:10px">
-    <button class="ghost" id="cmdToggle" type="button" onclick="toggleCommands()">📋 등록된 명령어 보기</button>
+  <div class="btnrow" style="margin-top:12px">
+    <button class="ghost" id="cmdToggle" type="button" onclick="toggleCommands()">등록된 명령어 보기</button>
   </div>
   <div id="cmdPanel" style="display:none">
     <div class="chips" id="cmdChips"></div>
     <p class="hint" id="chipsHint">누르면 내용을 불러옵니다.</p>
   </div>
 
-  <label>명령어 이름</label>
+  <label for="command">명령어 이름</label>
   <div class="cmdrow"><span class="slash">/</span><input id="command" placeholder="예: 이벤"></div>
 
-  <label>내용 <span id="count"></span></label>
+  <label for="response">내용 <span id="count"></span></label>
   <textarea id="response" placeholder="명령어 응답 내용을 붙여넣으세요 (길이 제한 없음)"></textarea>
 
   <div class="btnrow">
@@ -150,12 +205,12 @@ ADMIN_PAGE = """<!doctype html>
 
 <section class="card">
   <details>
-    <summary>🏷️ 방 이름 변경 이전 (방 제목이 바뀌었을 때만)</summary>
+    <summary>방 이름 변경 이전 (방 제목이 바뀌었을 때만)</summary>
     <p class="hint">카톡방 제목이 바뀌면 봇이 새로운 방으로 인식해 명령어·관리자·출석이
     끊깁니다. 옛 이름의 데이터를 새 이름으로 옮깁니다.</p>
-    <label>옛 방 이름</label>
+    <label for="oldRoom">옛 방 이름</label>
     <input id="oldRoom" list="rooms" placeholder="바뀌기 전 방 제목">
-    <label>새 방 이름</label>
+    <label for="newRoom">새 방 이름</label>
     <input id="newRoom" placeholder="바뀐 후 방 제목 (정확히)">
     <div class="btnrow">
       <button class="ghost" onclick="renameRoom()">이전 실행</button>
@@ -165,7 +220,7 @@ ADMIN_PAGE = """<!doctype html>
 </section>
 
 <datalist id="rooms"></datalist>
-<footer>KakaoPoGo · 포고정보 봇 관리자 페이지</footer>
+<footer><span class="miniball"></span>KakaoPoGo · 포고정보 봇 관리자 페이지</footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -226,7 +281,7 @@ refreshRooms();
 function hideCommands() {
   $("cmdPanel").style.display = "none";
   $("cmdChips").innerHTML = "";
-  $("cmdToggle").textContent = "📋 등록된 명령어 보기";
+  $("cmdToggle").textContent = "등록된 명령어 보기";
 }
 
 async function toggleCommands() {
@@ -246,7 +301,7 @@ async function refreshCommands() {
   if (!res.ok) return;
   const commands = await res.json();
   $("cmdPanel").style.display = "block";
-  $("cmdToggle").textContent = "📋 명령어 목록 접기 (" + commands.length + "개)";
+  $("cmdToggle").textContent = "명령어 목록 접기 (" + commands.length + "개)";
   if (!commands.length) {
     $("chipsHint").textContent = "이 방에 등록된 명령어가 아직 없어요.";
     return;
