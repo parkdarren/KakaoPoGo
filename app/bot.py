@@ -611,7 +611,10 @@ class PokemonGoBot:
         )
         if not added:
             return f"'{nickname}' 님은 이미 {pokemon_display} 명단에 있어요. (현재 {count}명)"
-        return f"✅ {pokemon_display} 레이드에 '{nickname}' 등록! (현재 {count}명)"
+        return (
+            f"✅ {pokemon_display} 레이드에 '{nickname}' 등록! (현재 {count}명)\n"
+            "571933305033로 친추주셔야 초대 갑니다!"
+        )
 
     def _handle_raid_leave(self, user: ChatUser, query: str) -> str:
         parsed = self._parse_raid_query(query)

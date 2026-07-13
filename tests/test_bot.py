@@ -947,7 +947,10 @@ async def test_raid_signup_roster_and_party_split(tmp_path) -> None:
     first = await bot.handle(
         "/레이드참가 DongDoro 오리진 디아루가", room="레이드방", sender="일반"
     )
-    assert first.reply == "✅ 오리진 디아루가 레이드에 'DongDoro' 등록! (현재 1명)"
+    assert first.reply == (
+        "✅ 오리진 디아루가 레이드에 'DongDoro' 등록! (현재 1명)\n"
+        "571933305033로 친추주셔야 초대 갑니다!"
+    )
 
     duplicate = await bot.handle(
         "/레이드참가 dongdoro 오리진디아루가", room="레이드방", sender="일반"
