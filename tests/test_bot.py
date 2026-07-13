@@ -1179,7 +1179,7 @@ async def test_raid_guide_and_cancel_ranking(tmp_path) -> None:
 
     # /레이드신청은 기본 안내문이고, 길어서 첫 줄만 보이게 접힌다.
     guide = await bot.handle("/레이드신청", room="레이드방", sender="일반")
-    assert guide.reply.startswith("🎫 레이드 초대 받는 방법")
+    assert guide.reply.startswith("🎫 레이드 초대 시스템 사용법")
     assert FOLD_PADDING in guide.reply
     assert guide.reply.replace(FOLD_PADDING, "") == RAID_GUIDE
 
