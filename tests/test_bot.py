@@ -962,98 +962,133 @@ async def test_room_names_are_normalized_across_entrances(tmp_path) -> None:
 
 
 @pytest.mark.anyio
-async def test_raid_signup_roster_and_party_split(tmp_path) -> None:
+async def test_raid_session_flow_with_host(tmp_path) -> None:
     bot = PokemonGoBot(
         admin_store=AdminStore(tmp_path / "test.sqlite3"),
         owner_setup_code="test-setup-code",
     )
     await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="회장")
 
-    bad = await bot.handle("/레이드참가 닉네임만", room="레이드방", sender="일반")
+    # 모집 전에는 참가가 거절된다.
+    early = await bot.handle(
+        "/참가 DongDoro 오리진디아루가 놋", room="레이드방", sender="일반"
+    )
+    assert "모집을 찾지 못했어요" in early.reply
+
+    # 모집은 관리자가 아니어도 누구나 열 수 있다.
+    opened = await bot.handle(
+        "/레이드모집 오리진 디아루가 놋",
+        room="레이드방",
+        sender="일반유저",
+        user_key="hash:host-not",
+    )
+    assert opened.reply.startswith("🔥 오리진 디아루가 레이드 모집 시작! (모집자: 놋)")
+    assert "/참가 게임닉네임 오리진 디아루가 놋" in opened.reply
+    assert "571933305033" in opened.reply
+
+    bad = await bot.handle("/참가 닉네임만", room="레이드방", sender="일반")
     assert "형식은 이렇게" in bad.reply
 
+    # 모집 중인 포켓몬 이름과 다르면(오리진 != 오리진디아루가) 등록되지 않는다.
+    wrong = await bot.handle("/참가 DongDoro 오리진 놋", room="레이드방", sender="일반")
+    assert "모집을 찾지 못했어요" in wrong.reply
+    # 모집자가 다르면 역시 등록되지 않는다.
+    wrong_host = await bot.handle(
+        "/참가 DongDoro 오리진디아루가 회장", room="레이드방", sender="일반"
+    )
+    assert "모집을 찾지 못했어요" in wrong_host.reply
+
     first = await bot.handle(
-        "/레이드참가 DongDoro 오리진 디아루가", room="레이드방", sender="일반"
+        "/참가 DongDoro 오리진 디아루가 놋", room="레이드방", sender="일반"
     )
-    assert first.reply == (
-        "✅ 오리진 디아루가 레이드에 'DongDoro' 등록! (현재 1명)\n"
-        "571933305033로 친추주셔야 초대 갑니다!"
+    expected_first = (
+        "✅ 오리진 디아루가 레이드(놋)에 'DongDoro' 등록! (현재 1명)"
+        + chr(10)
+        + "571933305033로 친추주셔야 초대 갑니다!"
     )
+    assert first.reply == expected_first
 
     duplicate = await bot.handle(
-        "/레이드참가 dongdoro 오리진디아루가", room="레이드방", sender="일반"
+        "/참가 dongdoro 오리진디아루가 놋", room="레이드방", sender="일반"
     )
-    assert "이미" in duplicate.reply  # 대소문자/띄어쓰기 달라도 같은 사람·같은 레이드
+    assert "이미" in duplicate.reply  # 대소문자/띄어쓰기 달라도 같은 사람
 
-    # 12명을 채워 팟이 나뉘는지 확인 (기존 1명 + 11명)
     for index in range(11):
         await bot.handle(
-            f"/레이드참가 유저{index:02d} 오리진디아루가", room="레이드방", sender="일반"
+            f"/참가 유저{index:02d} 오리진디아루가 놋", room="레이드방", sender="일반"
         )
 
-    roster = await bot.handle("/레이드명단 오리진디아루가", room="레이드방", sender="회장")
-    lines = roster.reply.split("\n")
-    assert lines[0] == "📋 오리진 디아루가 레이드 명단 — 총 12명"
+    roster = await bot.handle("/현황 오리진디아루가 놋", room="레이드방", sender="회장")
+    lines = roster.reply.split(chr(10))
+    assert lines[0] == "📋 오리진 디아루가 레이드 명단 (모집: 놋) — 총 12명"
     assert lines[1].startswith("1팟(10명): DongDoro, 유저00")
     assert lines[2].startswith("2팟(2명): 유저09, 유저10")
 
-    # 정렬 규칙: 숫자 -> 영문(같은 글자면 소문자 먼저) -> 한글
-    await bot.handle("/레이드참가 Abc 잠만보", room="레이드방", sender="일반")
-    await bot.handle("/레이드참가 abc멤버 잠만보", room="레이드방", sender="일반")
-    await bot.handle("/레이드참가 7lucky 잠만보", room="레이드방", sender="일반")
-    await bot.handle("/레이드참가 가나다 잠만보", room="레이드방", sender="일반")
-    order = await bot.handle("/레이드명단 잠만보", room="레이드방", sender="회장")
-    assert "1팟(4명): 7lucky, Abc, abc멤버, 가나다" in order.reply
-
-    summary = await bot.handle("/레이드명단", room="레이드방", sender="회장")
-    assert "- 오리진 디아루가: 12명" in summary.reply
+    # 같은 포켓몬이라도 모집자가 다르면 별도 명단이다.
+    await bot.handle("/레이드모집 오리진디아루가 부방장", room="레이드방", sender="부방장")
+    await bot.handle("/참가 solo 오리진디아루가 부방장", room="레이드방", sender="일반")
+    summary = await bot.handle("/현황", room="레이드방", sender="회장")
+    assert "- 오리진 디아루가 (모집: 놋) 12명" in summary.reply
+    assert "- 오리진디아루가 (모집: 부방장) 1명" in summary.reply
 
     left = await bot.handle(
-        "/레이드참가취소 DongDoro 오리진디아루가", room="레이드방", sender="일반"
+        "/취소 DongDoro 오리진디아루가 놋", room="레이드방", sender="일반"
     )
     assert "'DongDoro' 을(를) 뺐어요. (현재 11명)" in left.reply
 
-    denied = await bot.handle("/레이드초기화 전체", room="레이드방", sender="일반")
-    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
-
-    cleared = await bot.handle("/레이드초기화 오리진디아루가", room="레이드방", sender="회장")
-    assert "(11명 삭제)" in cleared.reply
-    empty = await bot.handle("/레이드명단 오리진디아루가", room="레이드방", sender="회장")
-    assert "비어 있어요" in empty.reply
-
 
 @pytest.mark.anyio
-async def test_raid_open_and_close_flow(tmp_path) -> None:
+async def test_raid_close_permissions_and_cleanup(tmp_path) -> None:
     bot = PokemonGoBot(
         admin_store=AdminStore(tmp_path / "test.sqlite3"),
         owner_setup_code="test-setup-code",
     )
     await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="회장")
 
-    denied = await bot.handle("/레이드모집 화이트큐레무", room="레이드방", sender="일반")
-    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+    await bot.handle(
+        "/레이드모집 화이트큐레무 놋",
+        room="레이드방",
+        sender="놋",
+        user_key="hash:host-not",
+    )
+    await bot.handle("/참가 alpha 화이트큐레무 놋", room="레이드방", sender="일반")
+    await bot.handle("/참가 bravo 화이트큐레무 놋", room="레이드방", sender="일반")
+    await bot.handle("/취소 bravo 화이트큐레무 놋", room="레이드방", sender="일반")
 
-    # 이전 명단이 남아 있어도 모집 시작 시 새로 비워진다.
-    await bot.handle("/레이드참가 남은사람 화이트큐레무", room="레이드방", sender="일반")
-    opened = await bot.handle("/레이드모집 화이트큐레무", room="레이드방", sender="회장")
-    assert opened.reply.startswith("🔥 화이트큐레무 레이드 모집 시작!")
-    assert "/레이드참가 게임닉네임 화이트큐레무" in opened.reply
+    # 모집을 연 사람도 관리자도 아니면 마감할 수 없다.
+    denied = await bot.handle(
+        "/마감 화이트큐레무 놋", room="레이드방", sender="지나가던사람", user_key="hash:x"
+    )
+    assert denied.reply == "모집을 연 사람 또는 관리자만 마감할 수 있어요."
 
-    await bot.handle("/레이드참가 alpha 화이트큐레무", room="레이드방", sender="일반")
-    await bot.handle("/레이드참가 bravo 화이트큐레무", room="레이드방", sender="일반")
-    # /레이드취소, /레이드현황 별칭도 동작한다.
-    await bot.handle("/레이드취소 bravo 화이트큐레무", room="레이드방", sender="일반")
-    status = await bot.handle("/레이드현황 화이트큐레무", room="레이드방", sender="일반")
-    assert "총 1명" in status.reply
-    assert "남은사람" not in status.reply  # 모집 시작 때 비워졌다
-
-    closed = await bot.handle("/레이드마감 화이트큐레무", room="레이드방", sender="회장")
-    assert closed.reply.startswith("🔒 화이트큐레무 레이드 마감 — 총 1명")
+    # 모집을 연 사람(user_key 기준)은 마감할 수 있다.
+    closed = await bot.handle(
+        "/마감 화이트큐레무 놋", room="레이드방", sender="놋", user_key="hash:host-not"
+    )
+    assert closed.reply.startswith("🔒 화이트큐레무 레이드 마감 (모집: 놋) — 총 1명")
     assert "1팟(1명): alpha" in closed.reply
 
-    # 마감하면 명단이 자동으로 비워진다.
-    after = await bot.handle("/레이드현황 화이트큐레무", room="레이드방", sender="회장")
-    assert "비어 있어요" in after.reply
+    # 마감하면 모집 자체가 사라진다.
+    after = await bot.handle("/현황 화이트큐레무 놋", room="레이드방", sender="회장")
+    assert "모집을 찾지 못했어요" in after.reply
+
+    # 다시 모집을 열고 이번엔 관리자가 마감한다.
+    await bot.handle(
+        "/레이드모집 화이트큐레무 놋", room="레이드방", sender="놋", user_key="hash:host-not"
+    )
+    await bot.handle("/참가 alpha 화이트큐레무 놋", room="레이드방", sender="일반")
+    admin_closed = await bot.handle("/마감 화이트큐레무 놋", room="레이드방", sender="회장")
+    assert admin_closed.reply.startswith("🔒 화이트큐레무 레이드 마감")
+
+    await bot.handle(
+        "/레이드모집 잠만보 놋", room="레이드방", sender="놋", user_key="hash:host-not"
+    )
+    denied_clear = await bot.handle("/레이드초기화 전체", room="레이드방", sender="일반")
+    assert denied_clear.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+    cleared = await bot.handle("/레이드초기화 전체", room="레이드방", sender="회장")
+    assert "1건을 모두 초기화" in cleared.reply
+    empty = await bot.handle("/현황", room="레이드방", sender="회장")
+    assert "진행 중인 레이드 모집이 없어요" in empty.reply
 
 
 @pytest.mark.anyio
