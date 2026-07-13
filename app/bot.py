@@ -338,10 +338,16 @@ class PokemonGoBot:
             return BotResponse(self._handle_custom_list(user, target_user.room))
 
         if command == "custom_run":
-            custom = self.admin_store.get_custom_command(
-                target_user.room,
-                self._normalize_custom_command(query),
-            )
+            normalized = self._normalize_custom_command(query)
+            # 명령을 친 방 자체에 등록된 것을 먼저 찾고, 없으면 관리
+            # 대상방의 것을 찾는다. 관리방 전용 명령어(/사이트 등)가
+            # 대상방 조회에 가려지지 않게 하기 위함이다.
+            custom = self.admin_store.get_custom_command(user.room, normalized)
+            if custom is None and target_user.room != user.room:
+                custom = self.admin_store.get_custom_command(
+                    target_user.room,
+                    normalized,
+                )
             if custom:
                 return BotResponse(fold_long_reply(custom.response))
             # 이 방에 등록되지 않은 명령어는 다른 봇의 것일 수 있으니 침묵한다.

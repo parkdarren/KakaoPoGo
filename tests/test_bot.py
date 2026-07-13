@@ -1018,6 +1018,16 @@ async def test_shared_admin_room_manages_target_room(tmp_path) -> None:
     )
     assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
+    # 관리방 자체에 등록된 명령어는 관리방에서 실행되고(대상방보다 우선),
+    # 대상방(종합방)에는 노출되지 않는다.
+    store.upsert_custom_command("관리방", "사이트", "관리 페이지 링크", "오너")
+    own_room = await bot.handle("/사이트", room="관리방", sender="부방장", user_key="hash:sub")
+    assert own_room.reply == "관리 페이지 링크"
+    fallback = await bot.handle("/공지", room="관리방", sender="부방장", user_key="hash:sub")
+    assert fallback.reply == "오늘 레이드 9시"  # 대상방 명령어는 여전히 동작
+    hidden = await bot.handle("/사이트", room="종합방", sender="일반")
+    assert hidden.silent is True
+
 
 @pytest.mark.anyio
 async def test_admin_can_manage_target_room_from_control_room(tmp_path) -> None:
