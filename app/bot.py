@@ -673,11 +673,18 @@ class PokemonGoBot:
             user.user_key,
         )
         return (
-            f"🔥 {pokemon_display} 레이드 모집 시작! (모집자: {host})\n"
-            f"참가: /참가 게임닉네임 {pokemon_display} {host}\n"
-            f"취소: /취소 게임닉네임 {pokemon_display} {host}\n"
-            f"명단: /현황 {pokemon_display} {host}\n"
-            f"{friend_code} 로 친추 주셔야 초대 가능합니다!"
+            "🔥 레이드 모집 오픈!\n"
+            "━━━━━━━━━━━━━━\n"
+            f"🎯 포켓몬 : {pokemon_display}\n"
+            f"👑 모집자 : {host}\n"
+            f"🤝 친구코드 : {friend_code}\n"
+            "━━━━━━━━━━━━━━\n"
+            f"✋ 참가 → /참가 게임닉네임 {pokemon_display} {host}\n"
+            f"😅 취소 → /취소 게임닉네임 {pokemon_display} {host}\n"
+            f"👀 명단 → /현황 {pokemon_display} {host}\n"
+            "\n"
+            f"⚠️ {friend_code} 친추가 되어 있어야\n"
+            "초대를 받을 수 있어요!"
         )
 
     def _handle_raid_join(self, user: ChatUser, query: str) -> str:
@@ -696,9 +703,10 @@ class PokemonGoBot:
         session = self.admin_store.get_raid_session(user.room, pokemon_key, host_key)
         if session is None:
             return (
-                f"'{pokemon_display}({host})' 모집을 찾지 못했어요.\n"
-                "포켓몬 이름과 모집자를 모집글과 똑같이 적어야 해요.\n"
-                "진행 중인 모집 확인: /현황"
+                f"❌ '{pokemon_display}({host})' 모집을 찾지 못했어요.\n"
+                "포켓몬 이름과 모집자를 모집글과\n"
+                "똑같이 적어주세요.\n"
+                "👀 진행 중인 모집 보기: /현황"
             )
         session_pokemon, session_host, friend_code, _ = session
         added, count = self.admin_store.add_raid_signup(
@@ -706,13 +714,14 @@ class PokemonGoBot:
         )
         if not added:
             return (
-                f"'{nickname}' 님은 이미 {session_pokemon}({session_host}) 명단에"
-                f" 있어요. (현재 {count}명)"
+                "이미 명단에 있어요!\n"
+                f"🎯 {session_pokemon} (모집: {session_host}) · 현재 {count}명"
             )
         return (
-            f"✅ {session_pokemon} 레이드({session_host})에 '{nickname}' 등록!"
-            f" (현재 {count}명)\n"
-            f"{friend_code} 로 친추 주셔야 초대 가능합니다!"
+            "✅ 신청 완료!\n"
+            f"🎯 {session_pokemon} (모집: {session_host})\n"
+            f"🙋 {nickname} 님 · 현재 {count}명\n"
+            f"🤝 친추 필수 → {friend_code}"
         )
 
     def _handle_raid_leave(self, user: ChatUser, query: str) -> str:
@@ -730,8 +739,9 @@ class PokemonGoBot:
         if not removed:
             return f"'{nickname}' 님은 {pokemon_display}({host}) 명단에 없어요."
         return (
-            f"{pokemon_display}({host}) 명단에서 '{nickname}' 을(를) 뺐어요."
-            f" (현재 {count}명)"
+            "✂️ 취소 완료\n"
+            f"🎯 {pokemon_display} (모집: {host}) · 현재 {count}명\n"
+            f"'{nickname}' 님을 명단에서 뺐어요."
         )
 
     def _handle_raid_list(self, user: ChatUser, query: str) -> str:
@@ -743,10 +753,11 @@ class PokemonGoBot:
                     "진행 중인 레이드 모집이 없어요.\n"
                     "/레이드모집 포켓몬이름 모집자닉네임 으로 시작!"
                 )
-            lines = ["📋 진행 중인 레이드 모집"]
-            for pokemon_display, host_display, count in sessions:
-                lines.append(f"- {pokemon_display} (모집: {host_display}) {count}명")
-            lines.append("자세히: /현황 포켓몬이름 모집자")
+            lines = ["📋 진행 중인 레이드 모집", "━━━━━━━━━━━━━━"]
+            for index, (pokemon_display, host_display, count) in enumerate(sessions, 1):
+                lines.append(f"{index}. {pokemon_display} · 모집 {host_display} · {count}명")
+            lines.append("━━━━━━━━━━━━━━")
+            lines.append("상세보기: /현황 포켓몬이름 모집자")
             return "\n".join(lines)
 
         parsed = self._parse_pokemon_and_host(stripped)
@@ -765,8 +776,9 @@ class PokemonGoBot:
             return f"{session_pokemon}({session_host}) 명단이 아직 비어 있어요."
 
         lines = [
-            f"📋 {session_pokemon} 레이드 명단 (모집: {session_host})"
-            f" — 총 {len(nicknames)}명"
+            f"📋 {session_pokemon} 레이드 명단",
+            f"👑 모집자 {session_host} · 총 {len(nicknames)}명",
+            "━━━━━━━━━━━━━━",
         ]
         lines.extend(self._party_lines(nicknames))
         return "\n".join(lines)
@@ -789,14 +801,17 @@ class PokemonGoBot:
         nicknames = self.admin_store.list_raid_signups(user.room, pokemon_key, host_key)
         self.admin_store.close_raid(user.room, pokemon_key, host_key)
         if not nicknames:
-            return f"{session_pokemon}({session_host}) 모집을 마감했어요. (신청자 없음)"
+            return f"🔒 {session_pokemon}({session_host}) 모집을 마감했어요. (신청자 없음)"
 
         lines = [
-            f"🔒 {session_pokemon} 레이드 마감 (모집: {session_host})"
-            f" — 총 {len(nicknames)}명"
+            "🔒 레이드 종료!",
+            "━━━━━━━━━━━━━━",
+            f"🎯 {session_pokemon} · 👑 {session_host}",
+            f"🧑‍🤝‍🧑 최종 참여 {len(nicknames)}명",
         ]
         lines.extend(self._party_lines(nicknames))
-        lines.append("순서대로 초대 갑니다. 게임 접속해 주세요!")
+        lines.append("━━━━━━━━━━━━━━")
+        lines.append("참여해 주신 분들 고생하셨어요! 🎉")
         return "\n".join(lines)
 
     def _handle_raid_clear(self, user: ChatUser, query: str) -> str:

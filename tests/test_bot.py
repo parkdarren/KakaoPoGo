@@ -1094,9 +1094,11 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
         sender="일반유저",
         user_key="hash:host-not",
     )
-    assert opened.reply.startswith("🔥 오리진 디아루가 레이드 모집 시작! (모집자: 놋)")
+    assert opened.reply.startswith("🔥 레이드 모집 오픈!")
+    assert "🎯 포켓몬 : 오리진 디아루가" in opened.reply
+    assert "👑 모집자 : 놋" in opened.reply
     assert "/참가 게임닉네임 오리진 디아루가 놋" in opened.reply
-    assert "571933305033 로 친추 주셔야 초대 가능합니다!" in opened.reply
+    assert "친구코드 : 571933305033" in opened.reply
 
     bad = await bot.handle("/참가 닉네임만", room="레이드방", sender="일반")
     assert "형식은 이렇게" in bad.reply
@@ -1113,10 +1115,13 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
     first = await bot.handle(
         "/참가 DongDoro 오리진 디아루가 놋", room="레이드방", sender="일반"
     )
-    expected_first = (
-        "✅ 오리진 디아루가 레이드(놋)에 'DongDoro' 등록! (현재 1명)"
-        + chr(10)
-        + "571933305033 로 친추 주셔야 초대 가능합니다!"
+    expected_first = chr(10).join(
+        [
+            "✅ 신청 완료!",
+            "🎯 오리진 디아루가 (모집: 놋)",
+            "🙋 DongDoro 님 · 현재 1명",
+            "🤝 친추 필수 → 571933305033",
+        ]
     )
     assert first.reply == expected_first
 
@@ -1132,9 +1137,10 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
 
     roster = await bot.handle("/현황 오리진디아루가 놋", room="레이드방", sender="회장")
     lines = roster.reply.split(chr(10))
-    assert lines[0] == "📋 오리진 디아루가 레이드 명단 (모집: 놋) — 총 12명"
-    assert lines[1].startswith("1팟(10명): DongDoro, user00")
-    assert lines[2].startswith("2팟(2명): user09, user10")
+    assert lines[0] == "📋 오리진 디아루가 레이드 명단"
+    assert lines[1] == "👑 모집자 놋 · 총 12명"
+    assert lines[3].startswith("1팟(10명): DongDoro, user00")
+    assert lines[4].startswith("2팟(2명): user09, user10")
 
     # 정렬: 영문 먼저, 숫자는 그 뒤 (포켓몬고 닉네임은 영문/숫자만 가능)
     await bot.handle("/레이드모집 잠만보 놋 571933305033", room="레이드방", sender="놋")
@@ -1150,13 +1156,15 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
     )
     await bot.handle("/참가 solo 오리진디아루가 부방장", room="레이드방", sender="일반")
     summary = await bot.handle("/현황", room="레이드방", sender="회장")
-    assert "- 오리진 디아루가 (모집: 놋) 12명" in summary.reply
-    assert "- 오리진디아루가 (모집: 부방장) 1명" in summary.reply
+    assert "오리진 디아루가 · 모집 놋 · 12명" in summary.reply
+    assert "오리진디아루가 · 모집 부방장 · 1명" in summary.reply
 
     left = await bot.handle(
         "/취소 DongDoro 오리진디아루가 놋", room="레이드방", sender="일반"
     )
-    assert "'DongDoro' 을(를) 뺐어요. (현재 11명)" in left.reply
+    assert left.reply.startswith("✂️ 취소 완료")
+    assert "'DongDoro' 님을 명단에서 뺐어요." in left.reply
+    assert "현재 11명" in left.reply
 
 
 @pytest.mark.anyio
@@ -1181,8 +1189,11 @@ async def test_raid_close_is_open_to_everyone(tmp_path) -> None:
     closed = await bot.handle(
         "/마감 화이트큐레무 놋", room="레이드방", sender="지나가던사람", user_key="hash:x"
     )
-    assert closed.reply.startswith("🔒 화이트큐레무 레이드 마감 (모집: 놋) — 총 1명")
+    assert closed.reply.startswith("🔒 레이드 종료!")
+    assert "🎯 화이트큐레무 · 👑 놋" in closed.reply
+    assert "최종 참여 1명" in closed.reply
     assert "1팟(1명): alpha" in closed.reply
+    assert "고생하셨어요" in closed.reply
 
     # 마감하면 모집 자체가 사라진다.
     after = await bot.handle("/현황 화이트큐레무 놋", room="레이드방", sender="회장")
