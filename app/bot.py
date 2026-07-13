@@ -147,9 +147,9 @@ BUILTIN_HELP_ENTRIES = [
         "이 방의 출석 순위를 상위 10명까지 보여줍니다.",
     ),
     (
-        "/레이드모집 포켓몬이름 모집자닉네임",
+        "/레이드모집 포켓몬이름 모집자닉네임 친구코드",
         "레이드 초대 모집을 엽니다. 누구나 열 수 있어요!\n"
-        "예시 : /레이드모집 오리진디아루가 놋",
+        "예시 : /레이드모집 오리진디아루가 놋 571933305033",
     ),
     (
         "/참가 닉네임 포켓몬이름 모집자",
@@ -157,11 +157,10 @@ BUILTIN_HELP_ENTRIES = [
         "예시 : /참가 DongDoro 오리진디아루가 놋\n"
         "취소 : /취소 닉네임 포켓몬이름 모집자\n"
         "명단 : /현황 (전체) 또는 /현황 포켓몬이름 모집자\n"
-        "마감 : /마감 포켓몬이름 모집자 (모집 연 사람·관리자만)",
+        "마감 : /마감 포켓몬이름 모집자",
     ),
 ]
 RAID_PARTY_SIZE = 10
-RAID_FRIEND_CODE_NOTICE = "571933305033로 친추주셔야 초대 갑니다!"
 ADMIN_COMMANDS = [
     "/레이드초기화 전체(또는 포켓몬이름 모집자)",
     "/대상방설정 공개방이름",
@@ -651,19 +650,26 @@ class PokemonGoBot:
         return lines
 
     def _handle_raid_open(self, user: ChatUser, query: str) -> str:
-        parsed = self._parse_pokemon_and_host(query)
-        if parsed is None:
-            return (
-                "형식은 이렇게 입력해 주세요.\n"
-                "/레이드모집 포켓몬이름 모집자닉네임\n"
-                "예: /레이드모집 오리진디아루가 놋"
-            )
-        pokemon_display, host = parsed
+        usage = (
+            "형식은 이렇게 입력해 주세요.\n"
+            "/레이드모집 포켓몬이름 모집자닉네임 친구코드\n"
+            "예: /레이드모집 오리진디아루가 놋 571933305033"
+        )
+        parts = query.strip().split()
+        if len(parts) < 3:
+            return usage
+        friend_code = parts[-1].replace("-", "")
+        host = parts[-2]
+        pokemon_display = " ".join(parts[:-2])
+        if not friend_code.isdigit() or len(friend_code) != 12:
+            return "친구코드는 숫자 12자리로 입력해 주세요.\n" + usage
+
         self.admin_store.open_raid(
             user.room,
             self._raid_key(pokemon_display),
             pokemon_display,
             host,
+            friend_code,
             user.user_key,
         )
         return (
@@ -671,7 +677,7 @@ class PokemonGoBot:
             f"참가: /참가 게임닉네임 {pokemon_display} {host}\n"
             f"취소: /취소 게임닉네임 {pokemon_display} {host}\n"
             f"명단: /현황 {pokemon_display} {host}\n"
-            + RAID_FRIEND_CODE_NOTICE
+            f"{friend_code} 로 친추 주셔야 초대 가능합니다!"
         )
 
     def _handle_raid_join(self, user: ChatUser, query: str) -> str:
@@ -694,7 +700,7 @@ class PokemonGoBot:
                 "포켓몬 이름과 모집자를 모집글과 똑같이 적어야 해요.\n"
                 "진행 중인 모집 확인: /현황"
             )
-        session_pokemon, session_host, _ = session
+        session_pokemon, session_host, friend_code, _ = session
         added, count = self.admin_store.add_raid_signup(
             user.room, pokemon_key, host_key, nickname
         )
@@ -705,7 +711,8 @@ class PokemonGoBot:
             )
         return (
             f"✅ {session_pokemon} 레이드({session_host})에 '{nickname}' 등록!"
-            f" (현재 {count}명)\n" + RAID_FRIEND_CODE_NOTICE
+            f" (현재 {count}명)\n"
+            f"{friend_code} 로 친추 주셔야 초대 가능합니다!"
         )
 
     def _handle_raid_leave(self, user: ChatUser, query: str) -> str:
@@ -752,7 +759,7 @@ class PokemonGoBot:
         session = self.admin_store.get_raid_session(user.room, pokemon_key, host_key)
         if session is None:
             return f"'{pokemon_display}({host})' 모집을 찾지 못했어요. 전체 확인: /현황"
-        session_pokemon, session_host, _ = session
+        session_pokemon, session_host, _friend_code, _ = session
         nicknames = self.admin_store.list_raid_signups(user.room, pokemon_key, host_key)
         if not nicknames:
             return f"{session_pokemon}({session_host}) 명단이 아직 비어 있어요."
@@ -775,9 +782,9 @@ class PokemonGoBot:
         session = self.admin_store.get_raid_session(user.room, pokemon_key, host_key)
         if session is None:
             return f"'{pokemon_display}({host})' 모집을 찾지 못했어요. 전체 확인: /현황"
-        session_pokemon, session_host, created_by = session
-        if user.user_key != created_by and not self.admin_store.is_admin_or_owner(user):
-            return "모집을 연 사람 또는 관리자만 마감할 수 있어요."
+        # 활발한 방에서는 알림 오귀속 때문에 모집자 본인 확인이 불가능해서
+        # 마감은 누구나 할 수 있게 열어둔다.
+        session_pokemon, session_host, _friend_code, _created_by = session
 
         nicknames = self.admin_store.list_raid_signups(user.room, pokemon_key, host_key)
         self.admin_store.close_raid(user.room, pokemon_key, host_key)

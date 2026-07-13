@@ -975,16 +975,24 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
     )
     assert "모집을 찾지 못했어요" in early.reply
 
-    # 모집은 관리자가 아니어도 누구나 열 수 있다.
+    # 친구코드가 없거나 숫자 12자리가 아니면 모집이 열리지 않는다.
+    no_code = await bot.handle("/레이드모집 오리진디아루가 놋", room="레이드방", sender="일반")
+    assert "형식은 이렇게" in no_code.reply
+    bad_code = await bot.handle(
+        "/레이드모집 오리진디아루가 놋 12345", room="레이드방", sender="일반"
+    )
+    assert "친구코드는 숫자 12자리" in bad_code.reply
+
+    # 모집은 관리자가 아니어도 누구나 열 수 있다. 코드는 하이픈도 허용.
     opened = await bot.handle(
-        "/레이드모집 오리진 디아루가 놋",
+        "/레이드모집 오리진 디아루가 놋 5719-3330-5033",
         room="레이드방",
         sender="일반유저",
         user_key="hash:host-not",
     )
     assert opened.reply.startswith("🔥 오리진 디아루가 레이드 모집 시작! (모집자: 놋)")
     assert "/참가 게임닉네임 오리진 디아루가 놋" in opened.reply
-    assert "571933305033" in opened.reply
+    assert "571933305033 로 친추 주셔야 초대 가능합니다!" in opened.reply
 
     bad = await bot.handle("/참가 닉네임만", room="레이드방", sender="일반")
     assert "형식은 이렇게" in bad.reply
@@ -1004,7 +1012,7 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
     expected_first = (
         "✅ 오리진 디아루가 레이드(놋)에 'DongDoro' 등록! (현재 1명)"
         + chr(10)
-        + "571933305033로 친추주셔야 초대 갑니다!"
+        + "571933305033 로 친추 주셔야 초대 가능합니다!"
     )
     assert first.reply == expected_first
 
@@ -1015,17 +1023,27 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
 
     for index in range(11):
         await bot.handle(
-            f"/참가 유저{index:02d} 오리진디아루가 놋", room="레이드방", sender="일반"
+            f"/참가 user{index:02d} 오리진디아루가 놋", room="레이드방", sender="일반"
         )
 
     roster = await bot.handle("/현황 오리진디아루가 놋", room="레이드방", sender="회장")
     lines = roster.reply.split(chr(10))
     assert lines[0] == "📋 오리진 디아루가 레이드 명단 (모집: 놋) — 총 12명"
-    assert lines[1].startswith("1팟(10명): DongDoro, 유저00")
-    assert lines[2].startswith("2팟(2명): 유저09, 유저10")
+    assert lines[1].startswith("1팟(10명): DongDoro, user00")
+    assert lines[2].startswith("2팟(2명): user09, user10")
+
+    # 정렬: 영문 먼저, 숫자는 그 뒤 (포켓몬고 닉네임은 영문/숫자만 가능)
+    await bot.handle("/레이드모집 잠만보 놋 571933305033", room="레이드방", sender="놋")
+    await bot.handle("/참가 zeta 잠만보 놋", room="레이드방", sender="일반")
+    await bot.handle("/참가 Abc 잠만보 놋", room="레이드방", sender="일반")
+    await bot.handle("/참가 7lucky 잠만보 놋", room="레이드방", sender="일반")
+    order = await bot.handle("/현황 잠만보 놋", room="레이드방", sender="회장")
+    assert "1팟(3명): Abc, zeta, 7lucky" in order.reply
 
     # 같은 포켓몬이라도 모집자가 다르면 별도 명단이다.
-    await bot.handle("/레이드모집 오리진디아루가 부방장", room="레이드방", sender="부방장")
+    await bot.handle(
+        "/레이드모집 오리진디아루가 부방장 111122223333", room="레이드방", sender="부방장"
+    )
     await bot.handle("/참가 solo 오리진디아루가 부방장", room="레이드방", sender="일반")
     summary = await bot.handle("/현황", room="레이드방", sender="회장")
     assert "- 오리진 디아루가 (모집: 놋) 12명" in summary.reply
@@ -1038,7 +1056,7 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
 
 
 @pytest.mark.anyio
-async def test_raid_close_permissions_and_cleanup(tmp_path) -> None:
+async def test_raid_close_is_open_to_everyone(tmp_path) -> None:
     bot = PokemonGoBot(
         admin_store=AdminStore(tmp_path / "test.sqlite3"),
         owner_setup_code="test-setup-code",
@@ -1046,7 +1064,7 @@ async def test_raid_close_permissions_and_cleanup(tmp_path) -> None:
     await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="회장")
 
     await bot.handle(
-        "/레이드모집 화이트큐레무 놋",
+        "/레이드모집 화이트큐레무 놋 571933305033",
         room="레이드방",
         sender="놋",
         user_key="hash:host-not",
@@ -1055,15 +1073,9 @@ async def test_raid_close_permissions_and_cleanup(tmp_path) -> None:
     await bot.handle("/참가 bravo 화이트큐레무 놋", room="레이드방", sender="일반")
     await bot.handle("/취소 bravo 화이트큐레무 놋", room="레이드방", sender="일반")
 
-    # 모집을 연 사람도 관리자도 아니면 마감할 수 없다.
-    denied = await bot.handle(
-        "/마감 화이트큐레무 놋", room="레이드방", sender="지나가던사람", user_key="hash:x"
-    )
-    assert denied.reply == "모집을 연 사람 또는 관리자만 마감할 수 있어요."
-
-    # 모집을 연 사람(user_key 기준)은 마감할 수 있다.
+    # 알림 오귀속 때문에 모집자 확인이 불가능해서 마감은 누구나 할 수 있다.
     closed = await bot.handle(
-        "/마감 화이트큐레무 놋", room="레이드방", sender="놋", user_key="hash:host-not"
+        "/마감 화이트큐레무 놋", room="레이드방", sender="지나가던사람", user_key="hash:x"
     )
     assert closed.reply.startswith("🔒 화이트큐레무 레이드 마감 (모집: 놋) — 총 1명")
     assert "1팟(1명): alpha" in closed.reply
@@ -1072,16 +1084,9 @@ async def test_raid_close_permissions_and_cleanup(tmp_path) -> None:
     after = await bot.handle("/현황 화이트큐레무 놋", room="레이드방", sender="회장")
     assert "모집을 찾지 못했어요" in after.reply
 
-    # 다시 모집을 열고 이번엔 관리자가 마감한다.
+    # 초기화는 여전히 관리자 전용이다.
     await bot.handle(
-        "/레이드모집 화이트큐레무 놋", room="레이드방", sender="놋", user_key="hash:host-not"
-    )
-    await bot.handle("/참가 alpha 화이트큐레무 놋", room="레이드방", sender="일반")
-    admin_closed = await bot.handle("/마감 화이트큐레무 놋", room="레이드방", sender="회장")
-    assert admin_closed.reply.startswith("🔒 화이트큐레무 레이드 마감")
-
-    await bot.handle(
-        "/레이드모집 잠만보 놋", room="레이드방", sender="놋", user_key="hash:host-not"
+        "/레이드모집 잠만보 놋 571933305033", room="레이드방", sender="놋", user_key="hash:host-not"
     )
     denied_clear = await bot.handle("/레이드초기화 전체", room="레이드방", sender="일반")
     assert denied_clear.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."

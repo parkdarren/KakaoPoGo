@@ -113,6 +113,7 @@ class AdminStore:
                     host_key TEXT NOT NULL,
                     pokemon_display TEXT NOT NULL,
                     host_display TEXT NOT NULL,
+                    friend_code TEXT NOT NULL DEFAULT '',
                     created_by TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (room, pokemon_key, host_key)
@@ -149,6 +150,7 @@ class AdminStore:
                     )
                     """
                 )
+            self._ensure_column(conn, "raid_sessions", "friend_code", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "custom_commands", "display_command", "TEXT")
             self._ensure_column(conn, "custom_commands", "taught_by", "TEXT")
             self._ensure_column(conn, "custom_commands", "taught_at", "TEXT")
@@ -300,6 +302,7 @@ class AdminStore:
         pokemon_key: str,
         pokemon_display: str,
         host: str,
+        friend_code: str,
         created_by: str,
     ) -> None:
         """레이드 모집 세션을 연다. 같은 포켓몬·모집자의 이전 명단은 비운다."""
@@ -315,10 +318,11 @@ class AdminStore:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO raid_sessions
-                    (room, pokemon_key, host_key, pokemon_display, host_display, created_by)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (room, pokemon_key, host_key, pokemon_display, host_display,
+                     friend_code, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (room, pokemon_key, host_key, pokemon_display, host, created_by),
+                (room, pokemon_key, host_key, pokemon_display, host, friend_code, created_by),
             )
 
     def get_raid_session(
@@ -326,12 +330,12 @@ class AdminStore:
         room: str,
         pokemon_key: str,
         host_key: str,
-    ) -> tuple[str, str, str] | None:
-        """(포켓몬 표시명, 모집자 표시명, 개설자 user_key)를 돌려준다."""
+    ) -> tuple[str, str, str, str] | None:
+        """(포켓몬 표시명, 모집자 표시명, 친구코드, 개설자 user_key)를 돌려준다."""
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT pokemon_display, host_display, created_by
+                SELECT pokemon_display, host_display, friend_code, created_by
                 FROM raid_sessions
                 WHERE room = ? AND pokemon_key = ? AND host_key = ?
                 """,
@@ -339,7 +343,12 @@ class AdminStore:
             ).fetchone()
         if row is None:
             return None
-        return row["pokemon_display"], row["host_display"], row["created_by"]
+        return (
+            row["pokemon_display"],
+            row["host_display"],
+            row["friend_code"],
+            row["created_by"],
+        )
 
     def add_raid_signup(
         self,
@@ -415,12 +424,15 @@ class AdminStore:
                 """,
                 (room, pokemon_key, host_key),
             ).fetchall()
-        # 숫자 -> 영문 -> 한글 순. 영문은 대소문자를 같은 순서로 취급하되,
-        # 같은 글자가 둘 다 있으면 소문자를 먼저 놓는다. (swapcase를 보조
-        # 키로 쓰면 'abc' < 'Abc'가 된다)
+        # 영문 -> 숫자 순 (포켓몬고 닉네임은 영문/숫자만 가능).
+        # 영문은 대소문자를 같은 순서로 취급하되, 같은 글자가 둘 다 있으면
+        # 소문자를 먼저 놓는다. (swapcase를 보조 키로 쓰면 'abc' < 'Abc')
         return sorted(
             (row["nickname"] for row in rows),
-            key=lambda name: (name.lower(), name.swapcase()),
+            key=lambda name: (
+                [(ch.isdigit(), ch.lower()) for ch in name],
+                name.swapcase(),
+            ),
         )
 
     def list_raid_sessions(self, room: str) -> list[tuple[str, str, int]]:
