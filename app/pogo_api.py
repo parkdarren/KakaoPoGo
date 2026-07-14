@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import math
 import time
 from dataclasses import dataclass, field
@@ -71,7 +72,9 @@ class PogoApiClient:
         self._name_indexes: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
     async def get_dex_entry(self, query: str) -> PokemonDexEntry:
-        resolved = self.name_resolver.resolve_query(query)
+        resolved = await self._resolve_number_query(query)
+        if resolved is None:
+            resolved = self.name_resolver.resolve_query(query)
         if resolved.mega or resolved.form == "Primal":
             return await self._get_mega_entry(resolved)
         stats = await self._find_by_name(
@@ -135,6 +138,32 @@ class PogoApiClient:
             recommended_fast_move=recommended_fast_move,
             recommended_charged_move=recommended_charged_move,
         )
+
+    async def _resolve_number_query(self, query: str) -> ResolvedPokemon | None:
+        """'42', '002', '487 오리진', '487오리진'처럼 번호로 시작하는 조회를 해석한다."""
+        matched = re.match(r"(\d+)\s*(.*)", query.strip())
+        if matched is None:
+            return None
+
+        dex_id = int(matched.group(1))
+        records = await self._fetch_json("pokemon_stats.json")
+        names = {
+            self._record_name(item)
+            for item in records
+            if int(item.get("pokemon_id", 0)) == dex_id
+        }
+        if not names:
+            return None
+
+        form = None
+        form_text = matched.group(2).strip()
+        if form_text:
+            form = self.name_resolver.resolve_form(form_text)
+            if form is None:
+                # 폼 표현을 못 알아들으면 번호 해석을 포기하고
+                # 이름 해석 쪽에서 실패 안내가 나가게 한다.
+                return None
+        return ResolvedPokemon(name=next(iter(names)), form=form)
 
     async def _get_mega_entry(self, resolved: ResolvedPokemon) -> PokemonDexEntry:
         records = await self._fetch_json("mega_pokemon.json")

@@ -121,6 +121,10 @@ class NameResolver:
     def display_name(self, canonical_name: str) -> str:
         return self.display_names.get(canonical_name, canonical_name)
 
+    def resolve_form(self, form_text: str) -> str | None:
+        """'오리진', '검왕' 같은 폼 표현을 정식 폼 이름으로 바꾼다."""
+        return self.form_aliases.get(_normalize(form_text))
+
     def resolve_query(self, query: str) -> ResolvedPokemon:
         normalized = _normalize(query)
         by_name = self._resolve_name_then_form(normalized)

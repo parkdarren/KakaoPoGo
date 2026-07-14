@@ -77,6 +77,68 @@ MEGA_FIXTURES = {
 }
 
 
+NUMBER_FIXTURES = {
+    "pokemon_stats.json": [
+        {"pokemon_id": 1, "pokemon_name": "Bulbasaur", "form": "Normal",
+         "base_attack": 118, "base_defense": 111, "base_stamina": 128},
+        {"pokemon_id": 487, "pokemon_name": "Giratina", "form": "Altered",
+         "base_attack": 187, "base_defense": 225, "base_stamina": 284},
+        {"pokemon_id": 487, "pokemon_name": "Giratina", "form": "Origin",
+         "base_attack": 225, "base_defense": 187, "base_stamina": 284},
+    ],
+    "pokemon_types.json": [
+        {"pokemon_id": 1, "pokemon_name": "Bulbasaur", "form": "Normal",
+         "type": ["Grass", "Poison"]},
+        {"pokemon_id": 487, "pokemon_name": "Giratina", "form": "Altered",
+         "type": ["Ghost", "Dragon"]},
+        {"pokemon_id": 487, "pokemon_name": "Giratina", "form": "Origin",
+         "type": ["Ghost", "Dragon"]},
+    ],
+    "current_pokemon_moves.json": [
+        {"pokemon_id": 1, "pokemon_name": "Bulbasaur", "form": "Normal",
+         "fast_moves": [], "charged_moves": [],
+         "elite_fast_moves": [], "elite_charged_moves": []},
+        {"pokemon_id": 487, "pokemon_name": "Giratina", "form": "Altered",
+         "fast_moves": [], "charged_moves": [],
+         "elite_fast_moves": [], "elite_charged_moves": []},
+        {"pokemon_id": 487, "pokemon_name": "Giratina", "form": "Origin",
+         "fast_moves": [], "charged_moves": [],
+         "elite_fast_moves": [], "elite_charged_moves": []},
+    ],
+    "type_effectiveness.json": {},
+    "weather_boosts.json": {},
+}
+
+
+@pytest.mark.anyio
+async def test_dex_lookup_by_pokedex_number(tmp_path, monkeypatch) -> None:
+    client = PogoApiClient(cache_dir=tmp_path)
+
+    async def fake_fetch(endpoint: str):
+        return NUMBER_FIXTURES[endpoint]
+
+    monkeypatch.setattr(client, "_fetch_json", fake_fetch)
+
+    plain = await client.get_dex_entry("1")
+    assert plain.name == "Bulbasaur"
+
+    padded = await client.get_dex_entry("001")
+    assert padded.name == "Bulbasaur"
+
+    with_form = await client.get_dex_entry("487 오리진")
+    assert with_form.name == "Giratina"
+    assert with_form.form == "Origin"
+
+    no_space = await client.get_dex_entry("487오리진")
+    assert no_space.form == "Origin"
+
+    default_form = await client.get_dex_entry("487")
+    assert default_form.form == "Altered"  # 기본 폼 우선순위
+
+    with pytest.raises(LookupError):
+        await client.get_dex_entry("9999")
+
+
 @pytest.mark.anyio
 async def test_mega_dex_entry_uses_mega_stats_and_types(tmp_path, monkeypatch) -> None:
     client = PogoApiClient(cache_dir=tmp_path)
