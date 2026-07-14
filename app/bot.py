@@ -20,6 +20,7 @@ from app.pogo_api import (
     format_perfect_cp_reply,
     format_weakness_reply,
 )
+from app.weather import KoreaWeatherClient, WeatherDataUnavailableError
 
 
 DATA_UNAVAILABLE_MESSAGE = (
@@ -137,6 +138,11 @@ BUILTIN_HELP_ENTRIES = [
         "줄임말 : /이벤트, /일정",
     ),
     (
+        "/날씨",
+        "오늘 전국 대표 지역의 오전/오후 날씨를 확인합니다.\n"
+        "줄임말 : /전국날씨",
+    ),
+    (
         "/오늘의포켓몬",
         "오늘의 파트너 포켓몬과 운세를 뽑고 출석체크가 됩니다.\n"
         f"하루 1회, 출석마다 {DAILY_CHECK_IN_POINTS}포인트 적립!\n"
@@ -252,6 +258,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "league", query
     if command in ("포켓몬고이벤트", "이벤트", "일정", "events"):
         return "events", query
+    if command in ("날씨", "전국날씨", "weather"):
+        return "weather", query
     if command in ("오늘의포켓몬", "출첵", "출석", "ㅊㅊ"):
         return "daily", query
     if command in ("출석랭킹", "출첵랭킹"):
@@ -336,11 +344,13 @@ class PokemonGoBot:
         self,
         pogo_client: PogoApiClient | None = None,
         event_client: PokemonGoEventClient | None = None,
+        weather_client: KoreaWeatherClient | None = None,
         admin_store: AdminStore | None = None,
         owner_setup_code: str | None = None,
     ) -> None:
         self.pogo_client = pogo_client or PogoApiClient()
         self.event_client = event_client or PokemonGoEventClient()
+        self.weather_client = weather_client or KoreaWeatherClient()
         self.admin_store = admin_store or AdminStore()
         self.owner_setup_code = (
             OWNER_SETUP_CODE if owner_setup_code is None else owner_setup_code
@@ -402,6 +412,14 @@ class PokemonGoBot:
             except EventDataUnavailableError:
                 return BotResponse(
                     "포켓몬GO 이벤트 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+                )
+
+        if command == "weather":
+            try:
+                return BotResponse(await self.weather_client.format_today())
+            except WeatherDataUnavailableError:
+                return BotResponse(
+                    "날씨 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
                 )
 
         if command == "owner_setup":
@@ -1208,6 +1226,9 @@ class PokemonGoBot:
             "이벤트",
             "일정",
             "events",
+            "날씨",
+            "전국날씨",
+            "weather",
             "오늘의포켓몬",
             "출첵",
             "출석",

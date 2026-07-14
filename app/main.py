@@ -56,6 +56,7 @@ KAKAO_CHANNEL_ALLOWED_COMMANDS = {
     "cp",
     "league",
     "events",
+    "weather",
 }
 KAKAO_CHANNEL_HELP_ENTRIES = [
     (
@@ -97,6 +98,11 @@ KAKAO_CHANNEL_HELP_ENTRIES = [
         "/포켓몬고이벤트",
         "진행 중인 이벤트, 7일간의 예정 이벤트, 현재 레이드를 확인합니다.\n"
         "예시 : /포켓몬고이벤트, /이벤트",
+    ),
+    (
+        "/날씨",
+        "오늘 전국 대표 지역의 오전/오후 날씨를 확인합니다.\n"
+        "예시 : /날씨, /전국날씨",
     ),
 ]
 

@@ -203,6 +203,11 @@ async def pokemon_go_events(interaction: discord.Interaction) -> None:
     await _run_core_command(interaction, "/포켓몬고이벤트")
 
 
+@tree.command(name="날씨", description="오늘 전국 대표 지역의 오전/오후 날씨를 봅니다.")
+async def weather(interaction: discord.Interaction) -> None:
+    await _run_core_command(interaction, "/날씨")
+
+
 @tree.command(name="오늘의포켓몬", description="오늘의 파트너 포켓몬과 출석을 확인합니다.")
 async def daily(interaction: discord.Interaction) -> None:
     await _run_core_command(interaction, "/오늘의포켓몬")
