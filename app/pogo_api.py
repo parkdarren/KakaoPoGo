@@ -28,6 +28,27 @@ class PogoDataUnavailableError(RuntimeError):
 
 class MegaUnavailableError(LookupError):
     """포켓몬은 있지만 해당 메가진화가 포켓몬GO에 아직 없을 때."""
+
+
+# 포켓몬GO에는 출시됐지만 pogoapi 반영이 늦는 메가를 임시로 보충한다.
+# 원본 데이터에 같은 mega_name이 생기면 원본이 우선한다.
+# 스탯 출처: pokebase.app (최대 CP 역산으로 검증: X 6910, Y 7267)
+MEGA_SUPPLEMENTS = [
+    {
+        "mega_name": "Mega Mewtwo X",
+        "pokemon_id": 150,
+        "pokemon_name": "Mewtwo",
+        "stats": {"base_attack": 399, "base_defense": 215, "base_stamina": 228},
+        "type": ["Psychic", "Fighting"],
+    },
+    {
+        "mega_name": "Mega Mewtwo Y",
+        "pokemon_id": 150,
+        "pokemon_name": "Mewtwo",
+        "stats": {"base_attack": 413, "base_defense": 223, "base_stamina": 228},
+        "type": ["Psychic"],
+    },
+]
 FORM_PRIORITY = {
     None: 0,
     "Normal": 0,
@@ -167,6 +188,10 @@ class PogoApiClient:
 
     async def _get_mega_entry(self, resolved: ResolvedPokemon) -> PokemonDexEntry:
         records = await self._fetch_json("mega_pokemon.json")
+        known_names = {item["mega_name"] for item in records}
+        records = list(records) + [
+            item for item in MEGA_SUPPLEMENTS if item["mega_name"] not in known_names
+        ]
         matches = [
             item
             for item in records

@@ -56,6 +56,14 @@ MEGA_FIXTURES = {
             "elite_charged_moves": [],
         },
         {
+            "pokemon_name": "Mewtwo",
+            "form": "Normal",
+            "fast_moves": ["Confusion"],
+            "charged_moves": ["Psystrike"],
+            "elite_fast_moves": [],
+            "elite_charged_moves": [],
+        },
+        {
             "pokemon_name": "Kyogre",
             "form": "Normal",
             "fast_moves": ["Waterfall"],
@@ -157,8 +165,18 @@ async def test_mega_dex_entry_uses_mega_stats_and_types(tmp_path, monkeypatch) -
     default_variant = await client.get_dex_entry("메가리자몽")
     assert default_variant.form == "Mega_X"
 
+    # 메가진화가 없는 포켓몬은 여전히 안내가 나간다.
     with pytest.raises(MegaUnavailableError):
-        await client.get_dex_entry("메가뮤츠")
+        await client.get_dex_entry("메가피카츄")
+
+    # pogoapi에 아직 없는 메가뮤츠는 보충 데이터로 조회된다.
+    mewtwo_y = await client.get_dex_entry("메가뮤츠Y")
+    assert mewtwo_y.base_attack == 413
+    assert mewtwo_y.types == ["Psychic"]
+
+    mewtwo_default = await client.get_dex_entry("메가뮤츠")
+    assert mewtwo_default.form == "Mega_X"
+    assert mewtwo_default.types == ["Psychic", "Fighting"]
 
 
 @pytest.mark.anyio
