@@ -139,6 +139,15 @@ class AdminStore:
                     PRIMARY KEY (room, pokemon_key, host_key, nickname_key)
                 );
 
+                CREATE TABLE IF NOT EXISTS chat_stats (
+                    room TEXT NOT NULL,
+                    user_key TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    chat_date TEXT NOT NULL,
+                    message_count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (room, user_key, chat_date)
+                );
+
                 CREATE TABLE IF NOT EXISTS raid_cancel_stats (
                     room TEXT NOT NULL,
                     nickname_key TEXT NOT NULL,
@@ -455,6 +464,59 @@ class AdminStore:
                 name.swapcase(),
             ),
         )
+
+    def record_chat_message(
+        self,
+        room: str,
+        user_key: str,
+        display_name: str,
+        today: str,
+    ) -> None:
+        """방·사람·날짜별 채팅 수를 1 올린다."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO chat_stats (room, user_key, display_name, chat_date, message_count)
+                VALUES (?, ?, ?, ?, 1)
+                ON CONFLICT(room, user_key, chat_date)
+                DO UPDATE SET message_count = message_count + 1,
+                              display_name = excluded.display_name
+                """,
+                (room, user_key, display_name, today),
+            )
+
+    def chat_ranking(
+        self,
+        room: str,
+        today: str | None = None,
+        limit: int = 10,
+    ) -> list[tuple[str, int]]:
+        """(닉네임, 채팅 수) 순위. today를 주면 그날만, 없으면 누적."""
+        with self._connect() as conn:
+            if today is None:
+                rows = conn.execute(
+                    """
+                    SELECT display_name, SUM(message_count) AS n
+                    FROM chat_stats
+                    WHERE room = ?
+                    GROUP BY user_key
+                    ORDER BY n DESC
+                    LIMIT ?
+                    """,
+                    (room, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT display_name, message_count AS n
+                    FROM chat_stats
+                    WHERE room = ? AND chat_date = ?
+                    ORDER BY n DESC
+                    LIMIT ?
+                    """,
+                    (room, today, limit),
+                ).fetchall()
+        return [(row["display_name"], row["n"]) for row in rows]
 
     def record_raid_cancel(self, room: str, nickname: str, today: str) -> tuple[int, int]:
         """취소 횟수를 닉네임별로 누적하고 (오늘 횟수, 누적 횟수)를 돌려준다."""

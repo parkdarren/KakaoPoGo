@@ -153,6 +153,11 @@ BUILTIN_HELP_ENTRIES = [
         "이 방의 출석 순위를 상위 10명까지 보여줍니다.",
     ),
     (
+        "/일일랭킹",
+        "오늘 이 방에서 채팅을 많이 한 순위 TOP 10을 보여줍니다.\n"
+        "누적 순위는 /랭킹",
+    ),
+    (
         "/레이드모집 포켓몬이름 모집자닉네임 친구코드",
         "레이드 초대 모집을 엽니다. 누구나 열 수 있어요!\n"
         "예시 : /레이드모집 오리진디아루가 RaidMaster 123456789012",
@@ -264,6 +269,10 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "daily", query
     if command in ("출석랭킹", "출첵랭킹"):
         return "attendance_ranking", query
+    if command in ("일일랭킹", "오늘랭킹"):
+        return "chat_ranking_daily", query
+    if command in ("랭킹", "누적랭킹", "채팅랭킹"):
+        return "chat_ranking_total", query
     if command in ("접기테스트",):
         return "fold_test", query
     if command in ("레이드신청", "레이드방법", "레이드안내"):
@@ -378,6 +387,12 @@ class PokemonGoBot:
 
         if command == "attendance_ranking":
             return BotResponse(self._handle_attendance_ranking(user))
+
+        if command == "chat_ranking_daily":
+            return BotResponse(self._handle_chat_ranking(user, daily=True))
+
+        if command == "chat_ranking_total":
+            return BotResponse(self._handle_chat_ranking(user, daily=False))
 
         if command == "fold_test":
             return BotResponse(self._handle_fold_test(query))
@@ -937,6 +952,31 @@ class PokemonGoBot:
             + body
         )
 
+    def record_chat(self, room: str, sender: str, user_key: str | None) -> None:
+        """랭킹 집계용으로 채팅 1건을 기록한다. 명령어든 일반 채팅이든 센다."""
+        clean = self._chat_user(room, sender, user_key)
+        if clean.room == "local" or clean.sender == "unknown":
+            return
+        self.admin_store.record_chat_message(
+            clean.room, clean.user_key, clean.sender, date.today().isoformat()
+        )
+
+    def _handle_chat_ranking(self, user: ChatUser, daily: bool) -> str:
+        today = date.today().isoformat() if daily else None
+        ranking = self.admin_store.chat_ranking(user.room, today=today, limit=10)
+        if not ranking:
+            if daily:
+                return "오늘 집계된 채팅이 아직 없어요."
+            return "집계된 채팅 기록이 아직 없어요."
+
+        title = "💬 오늘의 채팅 랭킹 TOP 10" if daily else "💬 누적 채팅 랭킹 TOP 10"
+        lines = [title, "━━━━━━━━━━━━━━"]
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        for rank, (display_name, count) in enumerate(ranking, start=1):
+            marker = medals.get(rank, f"{rank}.")
+            lines.append(f"{marker} {display_name} - {count:,}회")
+        return "\n".join(lines)
+
     def _handle_attendance_ranking(self, user: ChatUser) -> str:
         ranking = self.admin_store.attendance_ranking(user.room, limit=10)
         if not ranking:
@@ -1235,6 +1275,11 @@ class PokemonGoBot:
             "ㅊㅊ",
             "출석랭킹",
             "출첵랭킹",
+            "일일랭킹",
+            "오늘랭킹",
+            "랭킹",
+            "누적랭킹",
+            "채팅랭킹",
             "접기테스트",
             "레이드신청",
             "레이드방법",

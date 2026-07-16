@@ -246,6 +246,8 @@ def _extract_kakao_room(request: KakaoSkillRequest) -> str:
     response_class=AsciiJSONResponse,
 )
 async def command(request: CommandRequest) -> dict[str, Any]:
+    # 채팅 랭킹 집계: 명령어든 일반 채팅이든 도착한 메시지는 전부 센다.
+    bot.record_chat(request.room, request.sender, request.user_key)
     if _is_silent_message(request.text):
         return _silent_response()
 
@@ -271,6 +273,8 @@ async def command_get(
     sender: str = "local",
     user_key: str | None = None,
 ) -> dict[str, Any]:
+    # 채팅 랭킹 집계: 명령어든 일반 채팅이든 도착한 메시지는 전부 센다.
+    bot.record_chat(room, sender, user_key)
     if _is_silent_message(text):
         return _silent_response()
 

@@ -631,6 +631,51 @@ async def test_daily_pokemon_checks_in_once_per_day(tmp_path) -> None:
     assert "(누적 1일)" in other
 
 
+def test_chat_ranking_daily_and_total(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    test_bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    monkeypatch.setattr(main_module, "bot", test_bot)
+    monkeypatch.setenv("BRIDGE_KEY", "chat-secret")
+    client = TestClient(main_module.app)
+    auth = {"X-Bridge-Key": "chat-secret"}
+
+    def send(text, sender, key):
+        return client.get(
+            "/command",
+            headers=auth,
+            params={"text": text, "room": "수다방", "sender": sender, "user_key": key},
+        )
+
+    # 일반 채팅은 조용히 무시되지만 집계에는 포함된다.
+    for _ in range(3):
+        assert send("안녕하세요~", "수다왕", "hash:talker").json()["silent"] is True
+    send("점심 뭐 먹지", "조용한사람", "hash:quiet")
+    # 명령어도 채팅 1건으로 센다.
+    send("/도움말", "수다왕", "hash:talker")
+
+    daily = send("/일일랭킹", "수다왕", "hash:talker").json()["reply"]
+    lines = daily.split("\\n") if "\\n" in daily else daily.split("\n")
+    assert lines[0] == "💬 오늘의 채팅 랭킹 TOP 10"
+    assert "🥇 수다왕 - 5회" in daily  # 채팅 3 + /도움말 + /일일랭킹 자신
+    assert "🥈 조용한사람 - 1회" in daily
+
+    total = send("/랭킹", "조용한사람", "hash:quiet").json()["reply"]
+    assert total.startswith("💬 누적 채팅 랭킹 TOP 10")
+    assert "수다왕" in total
+
+    # 새 방에서는 방금 친 명령 자신만 1회로 잡힌다.
+    empty = client.get(
+        "/command",
+        headers=auth,
+        params={"text": "/일일랭킹", "room": "새방", "sender": "아무개", "user_key": "hash:new"},
+    ).json()["reply"]
+    assert "🥇 아무개 - 1회" in empty
+
+
 @pytest.mark.anyio
 async def test_attendance_ranking_shows_top_ten(tmp_path) -> None:
     from datetime import date
