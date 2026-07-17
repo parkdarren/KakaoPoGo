@@ -114,6 +114,16 @@ class CommandRequest(BaseModel):
     user_key: str | None = None
 
 
+class IrisMessageRequest(BaseModel):
+    # dolidolih/Iris 웹훅 형식. 카톡 DB에서 복호화한 메시지를 그대로 보낸다.
+    # msg=메시지, room=방이름, sender=보낸사람 이름,
+    # json=chat_logs 원본 행(user_id·chat_id 등 진짜 고유 ID 포함).
+    msg: str = ""
+    room: str = ""
+    sender: str = ""
+    json: dict[str, Any] = Field(default_factory=dict)
+
+
 class KakaoSkillRequest(BaseModel):
     userRequest: dict[str, Any] = Field(default_factory=dict)
     bot: dict[str, Any] = Field(default_factory=dict)
@@ -282,6 +292,42 @@ async def command_get(
     if response.silent:
         return _silent_response()
     return _reply_response(response.reply)
+
+
+def _iris_user_key(payload: dict[str, Any], sender: str) -> str:
+    # Iris는 카톡 DB의 진짜 user_id를 준다. 알림봇의 프로필 hash와 달리
+    # 방이 달라도 사람마다 유일하고 오귀속이 없다. 이게 이번 전환의 핵심.
+    user_id = str(payload.get("user_id") or "").strip()
+    if user_id:
+        return f"iris:{user_id}"
+    return f"sender:{sender}" if sender else "sender:unknown"
+
+
+@app.post("/iris/{token}", response_class=AsciiJSONResponse)
+async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any]:
+    # Iris는 고정 URL로 POST하고 커스텀 헤더를 붙이기 어려우므로,
+    # 인증은 URL 경로에 넣은 토큰(BRIDGE_KEY와 동일)으로 한다.
+    bridge_key = os.getenv("BRIDGE_KEY", "").strip()
+    if bridge_key and token != bridge_key:
+        raise HTTPException(status_code=403, detail="invalid iris token")
+
+    room = request.room
+    sender = request.sender
+    text = request.msg
+    user_key = _iris_user_key(request.json, sender)
+    chat_id = str(request.json.get("chat_id") or "").strip()
+
+    # 채팅 랭킹 집계: 명령어든 일반 채팅이든 도착한 메시지는 전부 센다.
+    bot.record_chat(room, sender, user_key)
+    if _is_silent_message(text):
+        return {"reply": "", "silent": True, "chat_id": chat_id}
+
+    response = await bot.handle(text, room=room, sender=sender, user_key=user_key)
+    if response.silent:
+        return {"reply": "", "silent": True, "chat_id": chat_id}
+    # 답장 전달 방식(응답 본문 vs Iris /reply 콜백)은 폰 도착 후 실제
+    # 연결을 보고 확정한다. chat_id를 함께 실어 콜백에도 대비한다.
+    return {"reply": response.reply, "silent": False, "chat_id": chat_id}
 
 
 @app.post("/kakao/skill")

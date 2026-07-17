@@ -366,6 +366,50 @@ def test_room_password_gates_web_edits(tmp_path, monkeypatch) -> None:
     assert no_pw.status_code == 404
 
 
+def test_iris_webhook_processes_message(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    test_bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    monkeypatch.setattr(main_module, "bot", test_bot)
+    monkeypatch.setenv("BRIDGE_KEY", "iris-secret")
+    client = TestClient(main_module.app)
+
+    def iris_payload(msg):
+        return {
+            "msg": msg,
+            "room": "레이드방",
+            "sender": "박화영",
+            "json": {"user_id": "12345", "chat_id": "999", "message": msg},
+        }
+
+    # 잘못된 토큰은 거절된다.
+    denied = client.post("/iris/wrong", json=iris_payload("/도감 피카츄"))
+    assert denied.status_code == 403
+
+    # 일반 채팅은 조용히 무시되지만 랭킹 집계에는 들어간다.
+    chat = client.post("/iris/iris-secret", json=iris_payload("안녕하세요")).json()
+    assert chat == {"reply": "", "silent": True, "chat_id": "999"}
+
+    # 명령어는 정상 처리되고 chat_id가 실려 온다.
+    reply = client.post("/iris/iris-secret", json=iris_payload("/도감 피카츄")).json()
+    assert reply["silent"] is False
+    assert reply["chat_id"] == "999"
+    assert "피카츄" in reply["reply"]
+
+    # user_id 기반 user_key로 오너 등록이 되고, 같은 user_id면 권한이 유지된다.
+    client.post("/iris/iris-secret", json=iris_payload("/오너등록 test-setup-code"))
+    saved = client.post(
+        "/iris/iris-secret", json=iris_payload("/명령어등록 공지 오늘 레이드 8시")
+    ).json()
+    assert saved["reply"] == "/공지 명령어를 저장했습니다."
+
+    record = test_bot.admin_store.list_admin_records("레이드방")
+    assert ("박화영", "owner", "iris:12345") in record
+
+
 def test_command_stays_open_without_bridge_key(monkeypatch) -> None:
     monkeypatch.delenv("BRIDGE_KEY", raising=False)
     client = TestClient(app)
