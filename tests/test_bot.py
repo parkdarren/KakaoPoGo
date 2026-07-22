@@ -761,24 +761,34 @@ async def test_raffle_draws_from_active_members_only(tmp_path) -> None:
         owner_setup_code="test-setup-code",
     )
 
-    # 활동 없는 방은 추첨 불가.
-    empty = await bot.handle("/추첨", room="빈방", sender="일반")
-    assert "추첨할 대상이 없어요" in empty.reply
+    from datetime import date, timedelta
 
-    # 활동한 사람만 풀에 들어간다.
+    today = date.today().isoformat()
+
+    # 오늘 활동이 없는 방은 추첨 불가.
+    empty = await bot.handle("/추첨", room="빈방", sender="일반")
+    assert "오늘 추첨할 대상이 없어요" in empty.reply
+
+    # 오늘 1회 이상 활동한 사람만 풀에 들어간다.
     for _ in range(5):
         bot.record_chat("추첨방", "활발이", "iris:1")
     bot.record_chat("추첨방", "가끔이", "iris:2")
 
-    pool = dict(bot.admin_store.raffle_pool("추첨방"))
-    assert pool == {"활발이": 5, "가끔이": 1}  # 가중치 = 활동량
+    pool = dict(bot.admin_store.raffle_pool("추첨방", today))
+    assert pool == {"활발이": 5, "가끔이": 1}  # 오늘 활동량
+
+    # 어제 활동뿐인 사람은 오늘 추첨에서 빠진다.
+    bot.admin_store.record_chat_message(
+        "추첨방", "iris:3", "어제만", (date.today() - timedelta(days=1)).isoformat()
+    )
+    assert "어제만" not in dict(bot.admin_store.raffle_pool("추첨방", today))
 
     result = await bot.handle("/추첨", room="추첨방", sender="일반")
     assert "🎉 추첨 결과" in result.reply
     assert ("활발이" in result.reply) or ("가끔이" in result.reply)
     # 활동량 숫자는 노출하지 않는다.
     assert "5회" not in result.reply and " - " not in result.reply
-    assert "총 2명" in result.reply
+    assert "오늘 활동자 2명" in result.reply
 
 
 def test_iris_skips_bot_own_messages(tmp_path, monkeypatch) -> None:
@@ -802,7 +812,9 @@ def test_iris_skips_bot_own_messages(tmp_path, monkeypatch) -> None:
         "msg": "안녕", "room": "방", "sender": "유저", "isMine": False,
         "json": {"user_id": "77", "chat_id": "1", "v": json.dumps({"isMine": False})},
     })
-    pool = dict(test_bot.admin_store.raffle_pool("방"))
+    from datetime import date
+
+    pool = dict(test_bot.admin_store.raffle_pool("방", date.today().isoformat()))
     assert "유저" in pool
     assert "봇" not in pool  # 봇 제외됨
 

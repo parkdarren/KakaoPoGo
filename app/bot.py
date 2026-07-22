@@ -1004,19 +1004,21 @@ class PokemonGoBot:
             self.admin_store.refresh_admin_display_name(clean.user_key, clean.sender)
 
     def _handle_raffle(self, user: ChatUser) -> str:
-        pool = self.admin_store.raffle_pool(user.room)
+        # 오늘 1회 이상 활동한 사람만 대상.
+        pool = self.admin_store.raffle_pool(user.room, date.today().isoformat())
         if not pool:
-            return "추첨할 대상이 없어요. (채팅 활동이 있어야 추첨 대상이 됩니다)"
+            return "오늘 추첨할 대상이 없어요. (오늘 채팅한 사람 중에서 뽑아요)"
         names = [name for name, _ in pool]
-        weights = [weight for _, weight in pool]
-        # 활동량이 많을수록 당첨 확률이 높다. 활동량 숫자는 표시하지 않는다.
+        # 가중치는 활동량의 제곱근으로 완만하게. 활동이 반영되되 압도적인
+        # 소수가 독식하지 않고 무작위성도 살아난다.
+        weights = [count**0.5 for _, count in pool]
         winner = random.choices(names, weights=weights, k=1)[0]
         return (
             "🎉 추첨 결과 🎉\n"
             "━━━━━━━━━━━━━━\n"
             f"🎊 당첨 : {winner} 님!\n"
             "━━━━━━━━━━━━━━\n"
-            f"축하합니다! (총 {len(names)}명 중 추첨)"
+            f"축하합니다! (오늘 활동자 {len(names)}명 중 추첨)"
         )
 
     def _handle_chat_ranking(self, user: ChatUser, daily: bool) -> str:
