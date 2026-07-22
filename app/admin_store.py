@@ -465,6 +465,17 @@ class AdminStore:
             ),
         )
 
+    def refresh_admin_display_name(self, user_key: str, display_name: str) -> None:
+        """관리자/오너의 표시 닉네임을 최신으로 갱신한다(바뀌었을 때만)."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE room_admins SET display_name = ?
+                WHERE user_key = ? AND display_name != ?
+                """,
+                (display_name, user_key, display_name),
+            )
+
     def record_chat_message(
         self,
         room: str,

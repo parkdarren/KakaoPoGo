@@ -1,3 +1,4 @@
+import json
 import pytest
 from fastapi.testclient import TestClient
 
@@ -408,6 +409,39 @@ def test_iris_webhook_processes_message(tmp_path, monkeypatch) -> None:
 
     record = test_bot.admin_store.list_admin_records("레이드방")
     assert ("박화영", "owner", "iris:12345") in record
+
+    # 답장은 outbox에 쌓이고, 폰이 폴링하면 /reply 로 보낼 JSON 줄로 나온다.
+    dex = client.post("/iris/iris-secret", json=iris_payload("/도감 피카츄")).json()
+    assert dex["silent"] is False
+    outbox = client.get("/iris/outbox/iris-secret")
+    assert outbox.status_code == 200
+    lines = [l for l in outbox.text.split("\n") if l]
+    # 마지막 줄이 방금 도감 답장 (room=chat_id "999")
+    last = json.loads(lines[-1])
+    assert last["type"] == "text"
+    assert last["room"] == "999"
+    assert "피카츄" in last["data"]
+    # 가져간 뒤에는 비워진다.
+    assert client.get("/iris/outbox/iris-secret").text.strip() == ""
+    # 잘못된 토큰은 거절.
+    assert client.get("/iris/outbox/wrong").status_code == 403
+
+    # 1:1 개인톡방: room·sender 가 null 로 와도 처리된다 (chat_id로 방 식별).
+    dm = client.post(
+        "/iris/iris-secret",
+        json={
+            "msg": "/오너등록 test-setup-code",
+            "room": None,
+            "sender": None,
+            "json": {"user_id": "77", "chat_id": "555"},
+        },
+    ).json()
+    assert dm["silent"] is False
+    assert dm["chat_id"] == "555"
+    # user_id 로 개인톡방(chat_id 기반)의 오너로 등록된다.
+    assert ("개인톡사용자", "owner", "iris:77") in test_bot.admin_store.list_admin_records(
+        "개인톡:555"
+    )
 
 
 def test_command_stays_open_without_bridge_key(monkeypatch) -> None:
@@ -1042,6 +1076,23 @@ async def test_nickname_impersonation_of_hash_owner_is_denied(tmp_path) -> None:
 
     assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
     assert store.list_admin_records("레이드방") == [("오너", "owner", "hash:real-owner")]
+
+
+@pytest.mark.anyio
+async def test_admin_display_name_auto_updates_on_activity(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
+
+    # 관리자를 옛 닉네임으로 등록.
+    store.add_admin(ChatUser(room="레이드방", sender="옛닉네임", user_key="iris:42"))
+    assert ("옛닉네임", "admin", "iris:42") in store.list_admin_records("레이드방")
+
+    # 그 사람이 새 닉네임으로 채팅하면(record_chat) 관리자목록 표시도 자동 갱신된다.
+    bot.record_chat("레이드방", "새닉네임", "iris:42")
+    assert ("새닉네임", "admin", "iris:42") in store.list_admin_records("레이드방")
+    assert not any(n == "옛닉네임" for n, _, _ in store.list_admin_records("레이드방"))
 
 
 @pytest.mark.anyio

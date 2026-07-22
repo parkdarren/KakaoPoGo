@@ -158,9 +158,9 @@ BUILTIN_HELP_ENTRIES = [
         "누적 순위는 /랭킹",
     ),
     (
-        "/레이드모집 포켓몬이름 모집자닉네임 친구코드",
+        "/모집 포켓몬이름 모집자닉네임 친구코드",
         "레이드 초대 모집을 엽니다. 누구나 열 수 있어요!\n"
-        "예시 : /레이드모집 오리진디아루가 RaidMaster 123456789012",
+        "예시 : /모집 오리진디아루가 RaidMaster 123456789012",
     ),
     (
         "/참가 닉네임 포켓몬이름 모집자",
@@ -169,7 +169,7 @@ BUILTIN_HELP_ENTRIES = [
         "취소 : /취소 닉네임 포켓몬이름 모집자\n"
         "명단 : /현황 (전체) 또는 /현황 포켓몬이름 모집자\n"
         "마감 : /마감 포켓몬이름 모집자\n"
-        "자세한 안내 : /레이드신청",
+        "자세한 안내 : /가이드",
     ),
 ]
 RAID_PARTY_SIZE = 10
@@ -178,13 +178,13 @@ RAID_GUIDE = (
     "━━━━━━━━━━━━━━━━━━\n"
     "\n"
     "📢 레이드 모집하고 싶다면 (누구나!)\n"
-    "/레이드모집 포켓몬이름 내닉네임 내친구코드\n"
-    "예) /레이드모집 오리진디아루가 RaidMaster 123456789012\n"
+    "/모집 포켓몬이름 내닉네임 내친구코드\n"
+    "예) /모집 오리진디아루가 RaidMaster 123456789012\n"
     "※ 친구코드는 숫자 12자리\n"
     "\n"
     "✋ 참가하고 싶다면\n"
     "1️⃣ 모집글에서 친구코드 확인 → 친추 먼저!\n"
-    "   (친추 없으면 초대를 못 받아요)\n"
+    "   (예전에 친구였어도 다시 확인! 주기적으로 정리해요)\n"
     "2️⃣ /참가 내게임닉네임 포켓몬이름 모집자\n"
     "예) /참가 GoTrainer 오리진디아루가 RaidMaster\n"
     "\n"
@@ -195,7 +195,7 @@ RAID_GUIDE = (
     "\n"
     "😅 못 가게 됐다면 (매너!)\n"
     "/취소 내게임닉네임 포켓몬이름 모집자\n"
-    "※ 취소 횟수가 기록됩니다 (오늘/누적)\n"
+    "※ 취소 후 모집자와 친구 삭제도 부탁!\n"
     "\n"
     "👀 명단 확인\n"
     "/현황 → 지금 열려있는 모집 전부\n"
@@ -275,11 +275,11 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "chat_ranking_total", query
     if command in ("접기테스트",):
         return "fold_test", query
-    if command in ("레이드신청", "레이드방법", "레이드안내"):
+    if command in ("가이드", "레이드하는법", "레이드신청", "레이드방법", "레이드안내"):
         return "raid_guide", query
     if command in ("취소랭킹", "레이드취소랭킹"):
         return "raid_cancel_stats", query
-    if command in ("레이드모집",):
+    if command in ("모집", "레이드모집"):
         return "raid_open", query
     if command in ("참가", "레이드참가"):
         return "raid_join", query
@@ -729,8 +729,8 @@ class PokemonGoBot:
     def _handle_raid_open(self, user: ChatUser, query: str) -> str:
         usage = (
             "형식은 이렇게 입력해 주세요.\n"
-            "/레이드모집 포켓몬이름 모집자닉네임 친구코드\n"
-            "예: /레이드모집 오리진디아루가 RaidMaster 123456789012"
+            "/모집 포켓몬이름 모집자닉네임 친구코드\n"
+            "예: /모집 오리진디아루가 RaidMaster 123456789012"
         )
         parts = query.strip().split()
         if len(parts) < 3:
@@ -822,8 +822,24 @@ class PokemonGoBot:
             "✂️ 취소 완료\n"
             f"🎯 {pokemon_display} (모집: {host}) · 현재 {count}명\n"
             f"'{nickname}' 님을 명단에서 뺐어요.\n"
-            f"취소 횟수 : 오늘 {daily}회 · 누적 {total}회"
+            f"취소 횟수 : 오늘 {daily}회 · 누적 {total}회\n"
+            f"👋 모집자 '{host}' 님과 친구 삭제도 부탁드려요!"
         )
+
+    @staticmethod
+    def _raid_join_notice(pokemon_display: str, host: str, friend_code: str) -> list[str]:
+        """/현황 하단에 붙는 참가·취소·친추 안내."""
+        lines = [
+            "━━━━━━━━━━━━━━",
+            f"✋ 참가 : /참가 게임닉네임 {pokemon_display} {host}",
+            f"😅 취소 : /취소 게임닉네임 {pokemon_display} {host}",
+        ]
+        if friend_code:
+            lines.append(f"🤝 친추코드 : {friend_code}")
+        lines.append("⚠️ 모집자 친추가 되어 있어야 초대를 받아요!")
+        lines.append("※ 예전에 친구였어도 다시 한번 확인하세요")
+        lines.append("   (주기적으로 친구를 정리해요)")
+        return lines
 
     def _handle_raid_list(self, user: ChatUser, query: str) -> str:
         stripped = query.strip()
@@ -832,13 +848,22 @@ class PokemonGoBot:
             if not sessions:
                 return (
                     "진행 중인 레이드 모집이 없어요.\n"
-                    "/레이드모집 포켓몬이름 모집자닉네임 으로 시작!"
+                    "/모집 포켓몬이름 모집자닉네임 친구코드 로 시작!"
                 )
             lines = ["📋 진행 중인 레이드 모집", "━━━━━━━━━━━━━━"]
             for index, (pokemon_display, host_display, count) in enumerate(sessions, 1):
                 lines.append(f"{index}. {pokemon_display} · 모집 {host_display} · {count}명")
-            lines.append("━━━━━━━━━━━━━━")
-            lines.append("상세보기: /현황 포켓몬이름 모집자")
+            # 모집이 하나면 그 모집자의 친추코드까지 바로 안내한다.
+            if len(sessions) == 1:
+                pokemon_display, host_display, _ = sessions[0]
+                session = self.admin_store.get_raid_session(
+                    user.room, self._raid_key(pokemon_display), host_display.lower()
+                )
+                friend_code = session[2] if session else ""
+                lines.extend(self._raid_join_notice(pokemon_display, host_display, friend_code))
+            else:
+                lines.append("━━━━━━━━━━━━━━")
+                lines.append("상세보기: /현황 포켓몬이름 모집자")
             return "\n".join(lines)
 
         parsed = self._parse_pokemon_and_host(stripped)
@@ -851,17 +876,19 @@ class PokemonGoBot:
         session = self.admin_store.get_raid_session(user.room, pokemon_key, host_key)
         if session is None:
             return f"'{pokemon_display}({host})' 모집을 찾지 못했어요. 전체 확인: /현황"
-        session_pokemon, session_host, _friend_code, _ = session
+        session_pokemon, session_host, friend_code, _ = session
         nicknames = self.admin_store.list_raid_signups(user.room, pokemon_key, host_key)
-        if not nicknames:
-            return f"{session_pokemon}({session_host}) 명단이 아직 비어 있어요."
 
         lines = [
             f"📋 {session_pokemon} 레이드 명단",
             f"👑 모집자 {session_host} · 총 {len(nicknames)}명",
             "━━━━━━━━━━━━━━",
         ]
-        lines.extend(self._party_lines(nicknames))
+        if nicknames:
+            lines.extend(self._party_lines(nicknames))
+        else:
+            lines.append("아직 신청자가 없어요.")
+        lines.extend(self._raid_join_notice(session_pokemon, session_host, friend_code))
         return "\n".join(lines)
 
     def _handle_raid_close(self, user: ChatUser, query: str) -> str:
@@ -960,6 +987,10 @@ class PokemonGoBot:
         self.admin_store.record_chat_message(
             clean.room, clean.user_key, clean.sender, date.today().isoformat()
         )
+        # 닉네임 자동 갱신: 관리자목록 표시 이름도 최신으로.
+        # 개인톡방 placeholder는 진짜 닉네임이 아니므로 제외한다.
+        if clean.sender != "개인톡사용자":
+            self.admin_store.refresh_admin_display_name(clean.user_key, clean.sender)
 
     def _handle_chat_ranking(self, user: ChatUser, daily: bool) -> str:
         today = date.today().isoformat() if daily else None
@@ -1281,9 +1312,12 @@ class PokemonGoBot:
             "누적랭킹",
             "채팅랭킹",
             "접기테스트",
+            "가이드",
+            "레이드하는법",
             "레이드신청",
             "레이드방법",
             "레이드안내",
+            "모집",
             "취소랭킹",
             "레이드취소랭킹",
             "레이드모집",

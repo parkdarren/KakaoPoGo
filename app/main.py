@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any
@@ -118,9 +119,10 @@ class IrisMessageRequest(BaseModel):
     # dolidolih/Iris 웹훅 형식. 카톡 DB에서 복호화한 메시지를 그대로 보낸다.
     # msg=메시지, room=방이름, sender=보낸사람 이름,
     # json=chat_logs 원본 행(user_id·chat_id 등 진짜 고유 ID 포함).
-    msg: str = ""
-    room: str = ""
-    sender: str = ""
+    # 1:1 개인톡방은 room·sender가 null 로 오므로 None 을 허용한다.
+    msg: str | None = ""
+    room: str | None = ""
+    sender: str | None = ""
     json: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -303,6 +305,24 @@ def _iris_user_key(payload: dict[str, Any], sender: str) -> str:
     return f"sender:{sender}" if sender else "sender:unknown"
 
 
+# Iris는 웹훅 응답을 답장에 쓰지 않고, 폰의 /reply 를 따로 호출해야 한다.
+# VPS는 집 네트워크 뒤의 폰에 직접 닿을 수 없으므로, 답장을 여기에 쌓아두고
+# 폰이 바깥으로 폴링해서(GET /iris/outbox) 가져가 자기 /reply 로 보낸다.
+_iris_outbox: list[dict[str, str]] = []
+_iris_outbox_lock = asyncio.Lock()
+_IRIS_OUTBOX_MAX = 500
+
+
+async def _enqueue_iris_reply(chat_id: str, reply: str) -> None:
+    if not chat_id or not reply:
+        return
+    async with _iris_outbox_lock:
+        _iris_outbox.append({"type": "text", "room": chat_id, "data": reply})
+        # 폰이 오래 죽어 있어도 메모리가 무한정 늘지 않게 오래된 것부터 버린다.
+        if len(_iris_outbox) > _IRIS_OUTBOX_MAX:
+            del _iris_outbox[: len(_iris_outbox) - _IRIS_OUTBOX_MAX]
+
+
 @app.post("/iris/{token}", response_class=AsciiJSONResponse)
 async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any]:
     # Iris는 고정 URL로 POST하고 커스텀 헤더를 붙이기 어려우므로,
@@ -311,11 +331,15 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
     if bridge_key and token != bridge_key:
         raise HTTPException(status_code=403, detail="invalid iris token")
 
-    room = request.room
-    sender = request.sender
-    text = request.msg
-    user_key = _iris_user_key(request.json, sender)
+    text = request.msg or ""
     chat_id = str(request.json.get("chat_id") or "").strip()
+    # 1:1 개인톡방은 room·sender가 없다. room은 chat_id로 고유하게 잡고,
+    # sender는 표시용 대체값을 쓴다(식별은 어차피 user_id로 함).
+    room = (request.room or "").strip()
+    if not room:
+        room = f"개인톡:{chat_id}" if chat_id else "local"
+    sender = (request.sender or "").strip() or "개인톡사용자"
+    user_key = _iris_user_key(request.json, sender)
 
     # 채팅 랭킹 집계: 명령어든 일반 채팅이든 도착한 메시지는 전부 센다.
     bot.record_chat(room, sender, user_key)
@@ -325,9 +349,29 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
     response = await bot.handle(text, room=room, sender=sender, user_key=user_key)
     if response.silent:
         return {"reply": "", "silent": True, "chat_id": chat_id}
-    # 답장 전달 방식(응답 본문 vs Iris /reply 콜백)은 폰 도착 후 실제
-    # 연결을 보고 확정한다. chat_id를 함께 실어 콜백에도 대비한다.
+
+    # 답장을 outbox에 쌓아 폰이 가져가게 한다.
+    await _enqueue_iris_reply(chat_id, response.reply)
     return {"reply": response.reply, "silent": False, "chat_id": chat_id}
+
+
+@app.get("/iris/outbox/{token}")
+async def iris_outbox(token: str) -> Response:
+    # 폰이 이 엔드포인트를 폴링해서 대기 중인 답장을 가져간다.
+    # 각 줄이 폰의 /reply 로 그대로 POST할 수 있는 완성된 JSON 이다(NDJSON).
+    bridge_key = os.getenv("BRIDGE_KEY", "").strip()
+    if bridge_key and token != bridge_key:
+        raise HTTPException(status_code=403, detail="invalid iris token")
+
+    async with _iris_outbox_lock:
+        pending = _iris_outbox[:]
+        _iris_outbox.clear()
+
+    lines = [
+        json.dumps(item, ensure_ascii=True, separators=(",", ":")) for item in pending
+    ]
+    body = ("\n".join(lines) + "\n") if lines else ""
+    return Response(content=body, media_type="application/x-ndjson")
 
 
 @app.post("/kakao/skill")
