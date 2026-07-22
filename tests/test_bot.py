@@ -755,6 +755,59 @@ def test_chat_ranking_daily_and_total(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.anyio
+async def test_raffle_draws_from_active_members_only(tmp_path) -> None:
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+
+    # 활동 없는 방은 추첨 불가.
+    empty = await bot.handle("/추첨", room="빈방", sender="일반")
+    assert "추첨할 대상이 없어요" in empty.reply
+
+    # 활동한 사람만 풀에 들어간다.
+    for _ in range(5):
+        bot.record_chat("추첨방", "활발이", "iris:1")
+    bot.record_chat("추첨방", "가끔이", "iris:2")
+
+    pool = dict(bot.admin_store.raffle_pool("추첨방"))
+    assert pool == {"활발이": 5, "가끔이": 1}  # 가중치 = 활동량
+
+    result = await bot.handle("/추첨", room="추첨방", sender="일반")
+    assert "🎉 추첨 결과" in result.reply
+    assert ("활발이" in result.reply) or ("가끔이" in result.reply)
+    # 활동량 숫자는 노출하지 않는다.
+    assert "5회" not in result.reply and " - " not in result.reply
+    assert "총 2명" in result.reply
+
+
+def test_iris_skips_bot_own_messages(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    test_bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    monkeypatch.setattr(main_module, "bot", test_bot)
+    monkeypatch.setenv("BRIDGE_KEY", "iris-secret")
+    client = TestClient(main_module.app)
+
+    # 봇 자기 메시지(isMine=true)는 집계에서 제외 → 추첨 풀에 안 들어감.
+    client.post("/iris/iris-secret", json={
+        "msg": "봇이 보낸 답장", "room": "방", "sender": "봇",
+        "json": {"user_id": "444", "chat_id": "1", "v": json.dumps({"isMine": True})},
+    })
+    # 일반 유저 메시지는 집계됨.
+    client.post("/iris/iris-secret", json={
+        "msg": "안녕", "room": "방", "sender": "유저", "isMine": False,
+        "json": {"user_id": "77", "chat_id": "1", "v": json.dumps({"isMine": False})},
+    })
+    pool = dict(test_bot.admin_store.raffle_pool("방"))
+    assert "유저" in pool
+    assert "봇" not in pool  # 봇 제외됨
+
+
+@pytest.mark.anyio
 async def test_attendance_ranking_shows_top_ten(tmp_path) -> None:
     from datetime import date
 

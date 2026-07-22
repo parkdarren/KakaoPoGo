@@ -496,6 +496,23 @@ class AdminStore:
                 (room, user_key, display_name, today),
             )
 
+    def raffle_pool(self, room: str) -> list[tuple[str, int]]:
+        """추첨 대상: 이 방에서 채팅 활동이 있는 사람의 (닉네임, 활동량 가중치).
+        활동이 0인 사람은 포함되지 않는다. 봇 자기 메시지는 애초에 집계되지
+        않으므로 자연히 제외된다."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT display_name, SUM(message_count) AS n
+                FROM chat_stats
+                WHERE room = ?
+                GROUP BY user_key
+                HAVING n > 0
+                """,
+                (room,),
+            ).fetchall()
+        return [(row["display_name"], row["n"]) for row in rows]
+
     def chat_ranking(
         self,
         room: str,

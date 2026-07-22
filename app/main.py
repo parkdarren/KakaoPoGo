@@ -296,6 +296,18 @@ async def command_get(
     return _reply_response(response.reply)
 
 
+def _iris_is_own_message(payload: dict[str, Any]) -> bool:
+    # chat_logs 의 v 필드(JSON 문자열)에 isMine 이 들어있다. 봇 계정이
+    # 직접 보낸 메시지면 true.
+    raw = payload.get("v")
+    if not raw:
+        return False
+    try:
+        return bool(json.loads(raw).get("isMine"))
+    except (ValueError, TypeError):
+        return False
+
+
 def _iris_user_key(payload: dict[str, Any], sender: str) -> str:
     # Iris는 카톡 DB의 진짜 user_id를 준다. 알림봇의 프로필 hash와 달리
     # 방이 달라도 사람마다 유일하고 오귀속이 없다. 이게 이번 전환의 핵심.
@@ -333,6 +345,12 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
 
     text = request.msg or ""
     chat_id = str(request.json.get("chat_id") or "").strip()
+
+    # 봇 자기 메시지(isMine)는 집계·처리하지 않는다. 그래야 랭킹·추첨에서
+    # 봇이 빠지고, 봇 답장이 다시 처리되는 무한루프도 막는다.
+    if _iris_is_own_message(request.json):
+        return {"reply": "", "silent": True, "chat_id": chat_id}
+
     # 1:1 개인톡방은 room·sender가 없다. room은 chat_id로 고유하게 잡고,
     # sender는 표시용 대체값을 쓴다(식별은 어차피 user_id로 함).
     room = (request.room or "").strip()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import random
 import unicodedata
 from dataclasses import dataclass
 from datetime import date
@@ -153,6 +154,11 @@ BUILTIN_HELP_ENTRIES = [
         "이 방의 출석 순위를 상위 10명까지 보여줍니다.",
     ),
     (
+        "/추첨",
+        "채팅 활동이 있는 사람 중 1명을 추첨합니다.\n"
+        "활동이 많을수록 당첨 확률이 높아요!",
+    ),
+    (
         "/일일랭킹",
         "오늘 이 방에서 채팅을 많이 한 순위 TOP 10을 보여줍니다.\n"
         "누적 순위는 /랭킹",
@@ -269,6 +275,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "daily", query
     if command in ("출석랭킹", "출첵랭킹"):
         return "attendance_ranking", query
+    if command in ("추첨", "랜덤추첨"):
+        return "raffle", query
     if command in ("일일랭킹", "오늘랭킹"):
         return "chat_ranking_daily", query
     if command in ("랭킹", "누적랭킹", "채팅랭킹"):
@@ -387,6 +395,9 @@ class PokemonGoBot:
 
         if command == "attendance_ranking":
             return BotResponse(self._handle_attendance_ranking(user))
+
+        if command == "raffle":
+            return BotResponse(self._handle_raffle(user))
 
         if command == "chat_ranking_daily":
             return BotResponse(self._handle_chat_ranking(user, daily=True))
@@ -992,6 +1003,22 @@ class PokemonGoBot:
         if clean.sender != "개인톡사용자":
             self.admin_store.refresh_admin_display_name(clean.user_key, clean.sender)
 
+    def _handle_raffle(self, user: ChatUser) -> str:
+        pool = self.admin_store.raffle_pool(user.room)
+        if not pool:
+            return "추첨할 대상이 없어요. (채팅 활동이 있어야 추첨 대상이 됩니다)"
+        names = [name for name, _ in pool]
+        weights = [weight for _, weight in pool]
+        # 활동량이 많을수록 당첨 확률이 높다. 활동량 숫자는 표시하지 않는다.
+        winner = random.choices(names, weights=weights, k=1)[0]
+        return (
+            "🎉 추첨 결과 🎉\n"
+            "━━━━━━━━━━━━━━\n"
+            f"🎊 당첨 : {winner} 님!\n"
+            "━━━━━━━━━━━━━━\n"
+            f"축하합니다! (총 {len(names)}명 중 추첨)"
+        )
+
     def _handle_chat_ranking(self, user: ChatUser, daily: bool) -> str:
         today = date.today().isoformat() if daily else None
         ranking = self.admin_store.chat_ranking(user.room, today=today, limit=10)
@@ -1306,6 +1333,8 @@ class PokemonGoBot:
             "ㅊㅊ",
             "출석랭킹",
             "출첵랭킹",
+            "추첨",
+            "랜덤추첨",
             "일일랭킹",
             "오늘랭킹",
             "랭킹",
