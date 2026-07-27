@@ -40,6 +40,19 @@ class CustomCommand:
     help_order: int | None
 
 
+def _raid_sort_key(name: str) -> list[tuple[int, str, int]]:
+    """레이드 명단 정렬 키: 숫자 먼저 -> 영문(aAbBcC 순) -> 기타."""
+    key: list[tuple[int, str, int]] = []
+    for ch in name:
+        if ch.isdigit():
+            key.append((0, ch, 0))
+        elif ch.isalpha():
+            key.append((1, ch.lower(), 0 if ch.islower() else 1))
+        else:
+            key.append((2, ch, 0))
+    return key
+
+
 class AdminStore:
     def __init__(self, db_path: Path = DB_PATH) -> None:
         self.db_path = db_path
@@ -454,16 +467,8 @@ class AdminStore:
                 """,
                 (room, pokemon_key, host_key),
             ).fetchall()
-        # 영문 -> 숫자 순 (포켓몬고 닉네임은 영문/숫자만 가능).
-        # 영문은 대소문자를 같은 순서로 취급하되, 같은 글자가 둘 다 있으면
-        # 소문자를 먼저 놓는다. (swapcase를 보조 키로 쓰면 'abc' < 'Abc')
-        return sorted(
-            (row["nickname"] for row in rows),
-            key=lambda name: (
-                [(ch.isdigit(), ch.lower()) for ch in name],
-                name.swapcase(),
-            ),
-        )
+        # 숫자 -> 영문 순. 영문은 같은 글자면 소문자 먼저(aAbBcC 순).
+        return sorted((row["nickname"] for row in rows), key=_raid_sort_key)
 
     def refresh_admin_display_name(self, user_key: str, display_name: str) -> None:
         """관리자/오너의 표시 닉네임을 최신으로 갱신한다(바뀌었을 때만)."""

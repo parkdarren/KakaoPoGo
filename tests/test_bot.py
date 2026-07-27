@@ -1387,13 +1387,15 @@ async def test_raid_session_flow_with_host(tmp_path) -> None:
     assert lines[3].startswith("1팟(10명): DongDoro, user00")
     assert lines[4].startswith("2팟(2명): user09, user10")
 
-    # 정렬: 영문 먼저, 숫자는 그 뒤 (포켓몬고 닉네임은 영문/숫자만 가능)
+    # 정렬: 숫자 먼저 -> 영문(aAbBcC 순)
     await bot.handle("/레이드모집 잠만보 놋 123456789012", room="레이드방", sender="놋")
     await bot.handle("/참가 zeta 잠만보 놋", room="레이드방", sender="일반")
     await bot.handle("/참가 Abc 잠만보 놋", room="레이드방", sender="일반")
+    await bot.handle("/참가 abcMember 잠만보 놋", room="레이드방", sender="일반")
     await bot.handle("/참가 7lucky 잠만보 놋", room="레이드방", sender="일반")
     order = await bot.handle("/현황 잠만보 놋", room="레이드방", sender="회장")
-    assert "1팟(3명): Abc, zeta, 7lucky" in order.reply
+    # 7lucky(숫자시작) -> abcMember(소문자 a) -> Abc(대문자 A) -> zeta
+    assert "1팟(4명): 7lucky, abcMember, Abc, zeta" in order.reply
 
     # 같은 포켓몬이라도 모집자가 다르면 별도 명단이다.
     await bot.handle(
