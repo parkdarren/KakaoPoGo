@@ -265,7 +265,7 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "moves", query
     if command in ("cp",):
         return "cp", query
-    if command in ("리그", "league", "pvp"):
+    if command in ("리그", "league"):
         return "league", query
     if command in ("포켓몬고이벤트", "이벤트", "일정", "events"):
         return "events", query
@@ -434,7 +434,9 @@ class PokemonGoBot:
 
         if command == "events":
             try:
-                return BotResponse(await self.event_client.format_schedule(days=7))
+                return BotResponse(
+                    fold_long_reply(await self.event_client.format_schedule(days=7))
+                )
             except EventDataUnavailableError:
                 return BotResponse(
                     "포켓몬GO 이벤트 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
@@ -1321,7 +1323,6 @@ class PokemonGoBot:
             "cp",
             "리그",
             "league",
-            "pvp",
             "포켓몬고이벤트",
             "이벤트",
             "일정",
