@@ -333,6 +333,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "target_set", query
     if command in ("대상방확인",):
         return "target_show", query
+    if command in ("관리링크", "방링크", "사이트주소"):
+        return "site_link", query
     if command in ("명령어등록", "명령어추가", "명령어수정"):
         return "custom_upsert", query
     if command in ("명령어이어쓰기", "명령어이어붙이기"):
@@ -497,6 +499,9 @@ class PokemonGoBot:
 
         if command == "target_show":
             return BotResponse(self._handle_target_show(user))
+
+        if command == "site_link":
+            return BotResponse(self._handle_site_link(user, target_user.room))
 
         if command == "custom_upsert":
             return BotResponse(self._handle_custom_upsert(user, target_user.room, query))
@@ -676,6 +681,29 @@ class PokemonGoBot:
         if not target_room:
             return "설정된 대상방이 없습니다."
         return f"현재 대상방: {target_room}"
+
+    def _handle_site_link(self, user: ChatUser, target_room: str) -> str:
+        if not self._can_manage_room(user, target_room):
+            return "owner 또는 admin만 관리 링크를 볼 수 있습니다."
+        token = self.admin_store.get_site_token_for_room_name(target_room)
+        if not token:
+            return (
+                f"'{target_room}' 방의 전용 링크가 아직 없습니다.\n"
+                "봇이 그 방의 메시지를 한 번 받은 뒤 다시 시도해 주세요."
+            )
+        base = os.getenv("SITE_BASE_URL", "").strip().rstrip("/")
+        path = f"/r/{token}"
+        link = f"{base}{path}" if base else path
+        return (
+            f"🔗 '{target_room}' 방 전용 관리 링크\n"
+            "━━━━━━━━━━━━━━\n"
+            f"{link}\n"
+            "\n"
+            "이 링크 하나로 그 방 명령어만 관리해요.\n"
+            "방 제목이 바뀌어도 같은 링크를 쓰면 됩니다.\n"
+            "※ 링크를 아는 사람은 편집할 수 있으니\n"
+            "  방 비밀번호를 함께 설정해 주세요."
+        )
 
     def _handle_owner_setup(self, user: ChatUser, code: str) -> str:
         if self.owner_setup_code in INSECURE_SETUP_CODES:
@@ -1396,6 +1424,9 @@ class PokemonGoBot:
             "관리자삭제",
             "대상방설정",
             "대상방확인",
+            "관리링크",
+            "방링크",
+            "사이트주소",
             "명령어추가",
             "명령어등록",
             "명령어수정",

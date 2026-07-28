@@ -48,6 +48,8 @@ def test_parse_new_commands() -> None:
     assert parse_command("/리그 마릴리") == ("league", "마릴리")
     assert parse_command("/pvp") == ("custom_run", "pvp")
     assert parse_command("/신청") == ("raid_apply_guide", "")
+    assert parse_command("/관리링크") == ("site_link", "")
+    assert parse_command("/방링크") == ("site_link", "")
     assert parse_command("/포켓몬고이벤트") == ("events", "")
     assert parse_command("/이벤트") == ("events", "")
     assert parse_command("/일정") == ("events", "")
@@ -227,6 +229,52 @@ def test_migrate_room_moves_and_merges_data(tmp_path) -> None:
     assert ranking["지우"] == (2, 10)  # 옛방 1일 + 새방 1일 합산
     assert ranking["웅이"] == (1, 5)
     assert store.attendance_ranking(old) == []
+
+
+def test_room_registry_token_survives_rename(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+
+    first = store.touch_room("CHAT-A", "처음이름방")
+    token = first["token"]
+    assert token
+    assert first["renamed_from"] is None
+    store.upsert_custom_command("처음이름방", "공지", "안녕", "오너")
+
+    # 토큰으로 방 이름과 명령어를 찾을 수 있다.
+    assert store.get_room_name_by_token(token) == "처음이름방"
+    assert store.get_site_token_for_room_name("처음이름방") == token
+
+    # 같은 chat_id로 이름만 바뀌면 토큰은 그대로, 데이터는 새 이름으로 이전된다.
+    second = store.touch_room("CHAT-A", "바뀐이름방")
+    assert second["token"] == token
+    assert second["renamed_from"] == "처음이름방"
+    assert store.get_room_name_by_token(token) == "바뀐이름방"
+    assert store.get_custom_command("바뀐이름방", "공지").response == "안녕"
+    assert store.get_custom_command("처음이름방", "공지") is None
+
+    # 다른 방은 다른 토큰을 받는다.
+    other = store.touch_room("CHAT-B", "다른방")
+    assert other["token"] != token
+
+
+def test_site_link_command_requires_admin(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    store.touch_room("CHAT-A", "우리방")
+    bot = PokemonGoBot(admin_store=store)
+
+    # 일반 이용자는 링크를 볼 수 없다.
+    user = ChatUser(room="우리방", sender="행인", user_key="iris:stranger")
+    reply = bot._handle_site_link(user, "우리방")
+    assert "owner 또는 admin" in reply
+
+    # 관리자는 전용 링크(/r/토큰)를 받는다.
+    admin = ChatUser(room="우리방", sender="관리자", user_key="iris:boss")
+    store.add_admin(admin)
+    token = store.get_site_token_for_room_name("우리방")
+    link_reply = bot._handle_site_link(admin, "우리방")
+    assert f"/r/{token}" in link_reply
 
 
 def test_admin_web_rename_room(tmp_path, monkeypatch) -> None:

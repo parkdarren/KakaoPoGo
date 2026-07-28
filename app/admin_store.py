@@ -169,6 +169,13 @@ class AdminStore:
                     last_cancel_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (room, nickname_key)
                 );
+
+                CREATE TABLE IF NOT EXISTS rooms (
+                    chat_id TEXT PRIMARY KEY,
+                    room_name TEXT NOT NULL,
+                    site_token TEXT NOT NULL UNIQUE,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 """
             )
             raid_columns = {
@@ -1103,6 +1110,69 @@ class AdminStore:
                 (new_room, old_room),
             )
         return moved
+
+    def touch_room(self, chat_id: str, room_name: str) -> dict[str, object]:
+        """Iris가 방 메시지를 보낼 때마다 chat_id↔현재 이름을 최신으로 유지한다.
+
+        chat_id는 카톡이 방마다 부여하는 불변 식별자라 방 제목이 바뀌어도
+        같은 방으로 이어진다. 이미 아는 chat_id인데 이름이 바뀌었으면
+        이름 기준으로 저장된 데이터를 새 이름으로 자동 이전한다.
+        반환: {"token": 전용링크토큰, "renamed_from": 옛이름 or None}.
+        """
+        chat_id = (chat_id or "").strip()
+        room_name = (room_name or "").strip()
+        if not chat_id or not room_name:
+            return {"token": None, "renamed_from": None}
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT room_name, site_token FROM rooms WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+            if row is None:
+                token = secrets.token_urlsafe(12)
+                conn.execute(
+                    "INSERT INTO rooms (chat_id, room_name, site_token) VALUES (?, ?, ?)",
+                    (chat_id, room_name, token),
+                )
+                return {"token": token, "renamed_from": None}
+            token = row["site_token"]
+            old_name = row["room_name"]
+            if old_name == room_name:
+                return {"token": token, "renamed_from": None}
+        # 이름이 바뀌었다 — 이름 기준 데이터를 옮기고 레지스트리를 갱신한다.
+        self.migrate_room(old_name, room_name)
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE rooms SET room_name = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE chat_id = ?",
+                (room_name, chat_id),
+            )
+        return {"token": token, "renamed_from": old_name}
+
+    def get_room_name_by_token(self, site_token: str) -> str | None:
+        """전용 링크 토큰으로 현재 방 이름을 찾는다."""
+        token = (site_token or "").strip()
+        if not token:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT room_name FROM rooms WHERE site_token = ?",
+                (token,),
+            ).fetchone()
+        return row["room_name"] if row else None
+
+    def get_site_token_for_room_name(self, room_name: str) -> str | None:
+        """현재 방 이름으로 전용 링크 토큰을 찾는다(링크 안내용)."""
+        name = (room_name or "").strip()
+        if not name:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT site_token FROM rooms WHERE room_name = ? "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (name,),
+            ).fetchone()
+        return row["site_token"] if row else None
 
     def list_custom_rooms(self) -> list[str]:
         """커스텀 명령어가 하나라도 등록된 방 이름 목록."""

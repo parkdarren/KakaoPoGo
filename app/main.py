@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from app.admin_page import ADMIN_PAGE
+from app.site_page import SITE_PAGE
 from app.bot import PokemonGoBot, normalize_room, parse_command
 from app.pogo_api import PogoApiClient, format_dex_reply
 
@@ -356,6 +357,11 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
     room = (request.room or "").strip()
     if not room:
         room = f"개인톡:{chat_id}" if chat_id else "local"
+    else:
+        # 그룹방은 chat_id로 정체를 고정한다. 방 제목이 바뀌었으면
+        # 이름 기준 데이터를 새 이름으로 자동 이전한 뒤 이어서 처리한다.
+        # 레지스트리도 봇 저장 규칙과 같은 정규화 이름을 써야 조회가 맞는다.
+        bot.admin_store.touch_room(chat_id, normalize_room(room))
     sender = (request.sender or "").strip() or "개인톡사용자"
     user_key = _iris_user_key(request.json, sender)
 
@@ -568,6 +574,120 @@ async def admin_rename_room(request: RenameRoomRequest) -> dict[str, Any]:
     _require_room_password(old_room, request.room_password)
     moved = bot.admin_store.migrate_room(old_room, new_room)
     return {"ok": True, **moved}
+
+
+# ── 방 전용 사이트 (한 링크 = 한 방) ───────────────────────────────
+# 토큰이 곧 방 범위다. 토큰으로 chat_id↔현재 방 이름을 서버가 해석하므로
+# 방 선택도, 대상방 설정도 없다. 방 제목이 바뀌어도 같은 토큰이 유지된다.
+class TokenCommandRequest(BaseModel):
+    command: str
+    response: str
+    sender: str = "웹관리"
+    room_password: str = ""
+
+
+class TokenPasswordSetRequest(BaseModel):
+    password: str
+    recovery_word: str
+
+
+class TokenPasswordChangeRequest(BaseModel):
+    recovery_word: str
+    new_password: str
+
+
+def _room_for_token(token: str) -> str:
+    room = bot.admin_store.get_room_name_by_token(token)
+    if not room:
+        raise HTTPException(status_code=404, detail="유효하지 않은 링크입니다.")
+    return room
+
+
+@app.get("/r/{token}", response_class=HTMLResponse)
+async def site_page(token: str) -> str:
+    return SITE_PAGE
+
+
+@app.get("/r/{token}/info")
+async def site_info(token: str) -> dict[str, Any]:
+    room = _room_for_token(token)
+    return {"room": room, "hasPassword": bot.admin_store.has_room_password(room)}
+
+
+@app.get("/r/{token}/commands")
+async def site_commands(token: str) -> list[dict[str, Any]]:
+    room = _room_for_token(token)
+    records = bot.admin_store.list_custom_command_records(room)
+    return [
+        {"command": record.display_command, "length": len(record.response)}
+        for record in records
+    ]
+
+
+@app.get("/r/{token}/command")
+async def site_get_command(token: str, command: str) -> dict[str, Any]:
+    room = _room_for_token(token)
+    normalized = PokemonGoBot._normalize_custom_command(command)
+    custom = bot.admin_store.get_custom_command(room, normalized)
+    if custom is None:
+        return {"found": False}
+    return {"found": True, "command": normalized, "response": custom.response}
+
+
+@app.post("/r/{token}/command")
+async def site_save_command(token: str, request: TokenCommandRequest) -> dict[str, Any]:
+    room = _room_for_token(token)
+    normalized = PokemonGoBot._normalize_custom_command(request.command)
+    response = request.response.strip()
+    if not normalized or not response:
+        raise HTTPException(status_code=400, detail="명령어와 내용을 입력해 주세요.")
+    if normalized in PokemonGoBot._reserved_custom_commands():
+        raise HTTPException(status_code=400, detail=f"'{normalized}'는 봇 기본 명령어라 사용할 수 없습니다.")
+    _require_room_password(room, request.room_password)
+    bot.admin_store.upsert_custom_command(room, normalized, response, request.sender)
+    return {"ok": True, "command": normalized, "length": len(response)}
+
+
+@app.delete("/r/{token}/command")
+async def site_delete_command(token: str, command: str, password: str = "") -> dict[str, Any]:
+    room = _room_for_token(token)
+    normalized = PokemonGoBot._normalize_custom_command(command)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="명령어 이름을 입력해 주세요.")
+    _require_room_password(room, password)
+    deleted = bot.admin_store.delete_custom_command(room, normalized)
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"'/{normalized}' — 삭제할 명령어가 없습니다. 이름을 확인해 주세요.",
+        )
+    return {"ok": True, "command": normalized}
+
+
+@app.post("/r/{token}/room-password")
+async def site_set_password(token: str, request: TokenPasswordSetRequest) -> dict[str, Any]:
+    room = _room_for_token(token)
+    password = request.password.strip()
+    recovery_word = request.recovery_word.strip()
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail="비밀번호는 4자 이상이어야 합니다.")
+    if not recovery_word:
+        raise HTTPException(status_code=400, detail="복구 단어를 입력해 주세요.")
+    if not bot.admin_store.set_room_password(room, password, recovery_word):
+        raise HTTPException(status_code=400, detail="이미 비밀번호가 설정된 방입니다.")
+    return {"ok": True}
+
+
+@app.post("/r/{token}/room-password/change")
+async def site_change_password(token: str, request: TokenPasswordChangeRequest) -> dict[str, Any]:
+    room = _room_for_token(token)
+    new_password = request.new_password.strip()
+    recovery_word = request.recovery_word.strip()
+    if len(new_password) < 4:
+        raise HTTPException(status_code=400, detail="새 비밀번호는 4자 이상이어야 합니다.")
+    if not bot.admin_store.change_room_password(room, recovery_word, new_password):
+        raise HTTPException(status_code=403, detail="복구 단어가 올바르지 않습니다.")
+    return {"ok": True}
 
 
 @app.get("/dex/{name}", dependencies=[Depends(_verify_bridge_key)])
