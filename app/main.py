@@ -470,6 +470,19 @@ async def admin_rooms() -> list[str]:
     return bot.admin_store.list_custom_rooms()
 
 
+@app.get("/admin/site-rooms", dependencies=[Depends(_verify_bridge_key)])
+async def admin_site_rooms() -> list[dict[str, Any]]:
+    # 봇이 속한 모든 방(레지스트리 기준)과 각 방의 구독자용 전용 토큰.
+    return [
+        {
+            "room": name,
+            "token": token,
+            "hasPassword": bot.admin_store.has_room_password(name),
+        }
+        for name, token in bot.admin_store.list_rooms()
+    ]
+
+
 @app.get("/admin/commands", dependencies=[Depends(_verify_bridge_key)])
 async def admin_list_commands(room: str) -> list[dict[str, Any]]:
     records = bot.admin_store.list_custom_command_records(normalize_room(room))

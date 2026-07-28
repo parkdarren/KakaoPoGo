@@ -156,6 +156,26 @@ ADMIN_PAGE = """<!doctype html>
     border: 1.5px solid var(--ink);
   }
   #count { font-weight: 500; color: var(--muted); font-size: 0.76rem; }
+
+  .linkrow {
+    border: 1px solid var(--line); border-radius: 14px; padding: 12px 13px;
+    margin-bottom: 9px; background: #fff;
+  }
+  .linkrow .rname { font-weight: 700; font-size: 0.88rem; word-break: break-all; }
+  .linkrow .rurl {
+    font-size: 0.76rem; color: var(--label); word-break: break-all;
+    margin: 5px 0 9px; font-family: ui-monospace, Menlo, monospace;
+  }
+  .linkrow .rmeta { display: flex; align-items: center; gap: 8px; }
+  .linkrow .tag {
+    font-size: 0.7rem; font-weight: 700; border-radius: 999px; padding: 3px 9px;
+  }
+  .linkrow .tag.on { background: #eaf7ee; color: #17724a; }
+  .linkrow .tag.off { background: #fdeeec; color: var(--red-deep); }
+  .linkrow button.copy {
+    margin-left: auto; background: #eceef4; color: #3a3d4d;
+    padding: 8px 14px; font-size: 0.82rem;
+  }
 </style>
 </head>
 <body>
@@ -205,6 +225,16 @@ ADMIN_PAGE = """<!doctype html>
     <button class="danger" onclick="deleteCommand()">삭제</button>
   </div>
   <div id="status" class="toast"></div>
+</section>
+
+<section class="card">
+  <h2><span class="dot"></span>구독자 링크 (배포용)</h2>
+  <p class="hint">봇이 들어가 있는 방마다 전용 링크예요. 구독자에게 링크와
+  방 비밀번호를 함께 전달하면 그 방 명령어만 관리할 수 있어요.</p>
+  <div class="btnrow" style="margin-top:12px">
+    <button class="ghost" id="linkToggle" type="button" onclick="toggleLinks()">방 목록 · 링크 보기</button>
+  </div>
+  <div id="linkList" style="display:none; margin-top:12px"></div>
 </section>
 
 <section class="card">
@@ -303,22 +333,103 @@ function option(value, text) {
   return el;
 }
 
+let siteRooms = [];
 async function refreshRooms() {
   if (!$("key").value) return;
   const res = await fetch("/admin/rooms", { headers: headers() });
   if (!res.ok) return;
-  const rooms = await res.json();
+  const customRooms = await res.json();
+  // 레지스트리(봇이 속한 모든 방)도 합쳐 빈 방까지 고를 수 있게 한다.
+  siteRooms = [];
+  try {
+    const sr = await fetch("/admin/site-rooms", { headers: headers() });
+    if (sr.ok) siteRooms = await sr.json();
+  } catch (e) {}
+  const names = [];
+  siteRooms.forEach((r) => { if (!names.includes(r.room)) names.push(r.room); });
+  customRooms.forEach((r) => { if (!names.includes(r)) names.push(r); });
+
   const saved = localStorage.getItem("kpg-room") || "";
   const select = $("roomSelect");
   select.innerHTML = "";
-  rooms.forEach((r) => select.appendChild(option(r, r)));
+  names.forEach((r) => select.appendChild(option(r, r)));
   select.appendChild(option("__custom__", "＋ 새 방 이름 직접 입력"));
-  if (rooms.includes(saved)) select.value = saved;
+  if (names.includes(saved)) select.value = saved;
   $("rooms").innerHTML = "";
-  rooms.forEach((r) => $("rooms").appendChild(option(r, r)));
+  names.forEach((r) => $("rooms").appendChild(option(r, r)));
+  if ($("linkList").style.display !== "none") renderLinks();
 }
 $("key").addEventListener("change", refreshRooms);
 refreshRooms();
+
+function toggleLinks() {
+  const box = $("linkList");
+  if (box.style.display !== "none") {
+    box.style.display = "none";
+    $("linkToggle").textContent = "방 목록 · 링크 보기";
+    return;
+  }
+  if (!$("key").value) return show("관리 키를 먼저 입력해 주세요.", false);
+  renderLinks();
+  box.style.display = "block";
+  $("linkToggle").textContent = "링크 목록 접기";
+}
+
+function renderLinks() {
+  const box = $("linkList");
+  box.innerHTML = "";
+  if (!siteRooms.length) {
+    box.innerHTML = '<p class="hint">봇이 속한 방이 아직 없어요. 봇을 방에 초대하고 메시지가 한 번 오면 나타나요.</p>';
+    return;
+  }
+  siteRooms.forEach((r) => {
+    const url = location.origin + "/r/" + r.token;
+    const row = document.createElement("div");
+    row.className = "linkrow";
+    const name = document.createElement("div");
+    name.className = "rname";
+    name.textContent = r.room;
+    const link = document.createElement("div");
+    link.className = "rurl";
+    link.textContent = url;
+    const meta = document.createElement("div");
+    meta.className = "rmeta";
+    const tag = document.createElement("span");
+    tag.className = "tag " + (r.hasPassword ? "on" : "off");
+    tag.textContent = r.hasPassword ? "비번 설정됨" : "비번 없음";
+    const copy = document.createElement("button");
+    copy.className = "copy";
+    copy.type = "button";
+    copy.textContent = "링크 복사";
+    copy.onclick = () => copyText(url, copy);
+    meta.appendChild(tag);
+    meta.appendChild(copy);
+    row.appendChild(name);
+    row.appendChild(link);
+    row.appendChild(meta);
+    box.appendChild(row);
+  });
+}
+
+function copyText(text, btn) {
+  const done = () => { const t = btn.textContent; btn.textContent = "복사됨!"; setTimeout(() => { btn.textContent = t; }, 1200); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try { document.execCommand("copy"); done(); } catch (e) {}
+  document.body.removeChild(ta);
+}
 
 function hideCommands() {
   $("cmdPanel").style.display = "none";
