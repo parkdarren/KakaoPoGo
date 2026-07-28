@@ -236,6 +236,14 @@ class AdminStore:
             ).fetchone()
         return row is not None
 
+    def has_any_owner(self) -> bool:
+        """방과 무관하게 이 봇에 owner가 한 명이라도 등록돼 있는지 본다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM room_admins WHERE role = 'owner' LIMIT 1"
+            ).fetchone()
+        return row is not None
+
     def get_role(self, user: ChatUser) -> str | None:
         with self._connect() as conn:
             row = conn.execute(

@@ -488,10 +488,10 @@ def test_iris_webhook_processes_message(tmp_path, monkeypatch) -> None:
     ).json()
     assert dm["silent"] is False
     assert dm["chat_id"] == "555"
-    # user_id 로 개인톡방(chat_id 기반)의 오너로 등록된다.
-    assert ("개인톡사용자", "owner", "iris:77") in test_bot.admin_store.list_admin_records(
-        "개인톡:555"
-    )
+    # 개인톡방(room·sender null)은 chat_id로 처리되지만, owner는 봇 전체에
+    # 단 한 명이라 이미 owner가 있으면 두 번째 등록은 차단된다.
+    assert dm["reply"] == "이미 이 봇에 owner가 등록되어 있습니다."
+    assert test_bot.admin_store.list_admin_records("개인톡:555") == []
 
 
 def test_command_stays_open_without_bridge_key(monkeypatch) -> None:
@@ -957,7 +957,7 @@ async def test_owner_approves_admin_request(tmp_path) -> None:
         room="레이드방",
         sender="오너",
     )
-    assert owner.reply == "이 방의 owner로 등록되었습니다."
+    assert owner.reply == "이 봇의 owner로 등록되었습니다."
 
     requester = await bot.handle(
         "/관리자요청",
@@ -1118,8 +1118,37 @@ async def test_owner_setup_does_not_replace_existing_owner(tmp_path) -> None:
     blocked = await bot.handle("/오너등록 test-setup-code", room="레이드방", sender="현재오너")
 
     admins = store.list_admin_records("레이드방")
-    assert blocked.reply == "이 방에는 이미 owner가 등록되어 있습니다."
+    assert blocked.reply == "이미 이 봇에 owner가 등록되어 있습니다."
     assert admins == [("이전오너", "owner", "hash:previous-owner")]
+
+
+@pytest.mark.anyio
+async def test_owner_is_global_single_owner_across_rooms(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
+
+    first = await bot.handle(
+        "/오너등록 test-setup-code",
+        room="개인톡:dm",
+        sender="박정우",
+        user_key="iris:owner",
+    )
+    assert first.reply == "이 봇의 owner로 등록되었습니다."
+
+    # 다른 방(자기 개인톡 등)에서 코드를 알아도 두 번째 owner는 못 만든다.
+    intruder = await bot.handle(
+        "/오너등록 test-setup-code",
+        room="개인톡:다른사람",
+        sender="침입자",
+        user_key="iris:intruder",
+    )
+    assert intruder.reply == "이미 이 봇에 owner가 등록되어 있습니다."
+    assert store.has_any_owner() is True
+    assert store.is_owner(ChatUser(room="아무방", sender="침입자", user_key="iris:intruder")) is False
+    # 진짜 owner는 어느 방에서든 owner로 인식된다.
+    assert store.is_owner(ChatUser(room="아무방", sender="박정우", user_key="iris:owner")) is True
 
 
 @pytest.mark.anyio
@@ -1136,7 +1165,7 @@ async def test_owner_setup_does_not_upgrade_different_legacy_owner(tmp_path) -> 
     )
 
     admins = store.list_admin_records("레이드방")
-    assert blocked.reply == "이 방에는 이미 owner가 등록되어 있습니다."
+    assert blocked.reply == "이미 이 봇에 owner가 등록되어 있습니다."
     assert admins == [("예전오너", "owner", "sender:예전오너")]
 
 

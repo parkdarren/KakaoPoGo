@@ -713,14 +713,16 @@ class PokemonGoBot:
             )
         if code.strip() != self.owner_setup_code:
             return "오너 등록 코드가 맞지 않습니다."
-        if self.admin_store.has_owner(user.room):
+        # owner는 방이 아니라 봇 전체의 소유자다. 어느 방이든 이미 owner가
+        # 있으면 새 owner 등록은 막는다(코드가 새더라도 두 번째 owner 방지).
+        if self.admin_store.has_any_owner():
             if self.admin_store.is_owner(user):
                 self.admin_store.replace_owner(user)
-                return "이미 이 방의 owner로 등록되어 있습니다."
-            return "이 방에는 이미 owner가 등록되어 있습니다."
+                return "이미 이 봇의 owner입니다."
+            return "이미 이 봇에 owner가 등록되어 있습니다."
 
         self.admin_store.add_owner(user)
-        return "이 방의 owner로 등록되었습니다."
+        return "이 봇의 owner로 등록되었습니다."
 
     def _handle_admin_request(self, user: ChatUser) -> str:
         if self.admin_store.is_admin_or_owner(user):
