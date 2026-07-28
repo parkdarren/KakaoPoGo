@@ -1169,6 +1169,14 @@ class AdminStore:
             ).fetchone()
         return row["room_name"] if row else None
 
+    def list_rooms(self) -> list[tuple[str, str]]:
+        """등록된 방과 각 전용 토큰 목록. (개인톡으로 링크 안내할 때 쓴다)"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT room_name, site_token FROM rooms ORDER BY updated_at DESC"
+            ).fetchall()
+        return [(row["room_name"], row["site_token"]) for row in rows]
+
     def get_site_token_for_room_name(self, room_name: str) -> str | None:
         """현재 방 이름으로 전용 링크 토큰을 찾는다(링크 안내용)."""
         name = (room_name or "").strip()

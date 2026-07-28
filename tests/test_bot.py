@@ -257,24 +257,54 @@ def test_room_registry_token_survives_rename(tmp_path) -> None:
     assert other["token"] != token
 
 
-def test_site_link_command_requires_admin(tmp_path) -> None:
+def test_site_link_never_leaks_in_group_room(tmp_path) -> None:
     from app.admin_store import ChatUser
 
     store = AdminStore(tmp_path / "test.sqlite3")
     store.touch_room("CHAT-A", "우리방")
     bot = PokemonGoBot(admin_store=store)
-
-    # 일반 이용자는 링크를 볼 수 없다.
-    user = ChatUser(room="우리방", sender="행인", user_key="iris:stranger")
-    reply = bot._handle_site_link(user, "우리방")
-    assert "owner 또는 admin" in reply
-
-    # 관리자는 전용 링크(/r/토큰)를 받는다.
-    admin = ChatUser(room="우리방", sender="관리자", user_key="iris:boss")
-    store.add_admin(admin)
+    owner = ChatUser(room="개인톡:owner", sender="박정우", user_key="iris:owner")
+    store.add_owner(owner)
     token = store.get_site_token_for_room_name("우리방")
-    link_reply = bot._handle_site_link(admin, "우리방")
-    assert f"/r/{token}" in link_reply
+
+    # 공개 채팅방에서는 오너가 쳐도 링크가 절대 안 나온다(개인톡으로 안내만).
+    in_group = bot._handle_site_link(
+        ChatUser(room="우리방", sender="박정우", user_key="iris:owner"), ""
+    )
+    assert f"/r/{token}" not in in_group.reply
+    assert "개인톡" in in_group.reply
+
+    # 공개 채팅방에서 일반 사용자가 치면 조용히 무시한다(존재 자체를 안 흘림).
+    stranger = bot._handle_site_link(
+        ChatUser(room="우리방", sender="행인", user_key="iris:stranger"), ""
+    )
+    assert stranger.silent is True
+
+
+def test_site_link_shown_only_in_owner_dm(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    store.touch_room("CHAT-A", "우리방")
+    bot = PokemonGoBot(admin_store=store)
+    owner = ChatUser(room="개인톡:owner", sender="박정우", user_key="iris:owner")
+    store.add_owner(owner)
+    token = store.get_site_token_for_room_name("우리방")
+
+    # 개인톡에서 오너는 방 목록과 링크를 받는다.
+    listing = bot._handle_site_link(owner, "")
+    assert f"/r/{token}" in listing.reply
+    assert "우리방" in listing.reply
+
+    # 방 이름을 지정하면 그 방 링크만 준다.
+    one = bot._handle_site_link(owner, "우리방")
+    assert f"/r/{token}" in one.reply
+
+    # 오너가 아닌 사람은 개인톡에서도 링크를 못 본다.
+    stranger = ChatUser(room="개인톡:x", sender="행인", user_key="iris:stranger")
+    denied = bot._handle_site_link(stranger, "")
+    assert f"/r/{token}" not in denied.reply
+    assert "오너" in denied.reply
 
 
 def test_admin_web_rename_room(tmp_path, monkeypatch) -> None:

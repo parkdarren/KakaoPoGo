@@ -501,7 +501,7 @@ class PokemonGoBot:
             return BotResponse(self._handle_target_show(user))
 
         if command == "site_link":
-            return BotResponse(self._handle_site_link(user, target_user.room))
+            return self._handle_site_link(user, query)
 
         if command == "custom_upsert":
             return BotResponse(self._handle_custom_upsert(user, target_user.room, query))
@@ -682,28 +682,56 @@ class PokemonGoBot:
             return "설정된 대상방이 없습니다."
         return f"현재 대상방: {target_room}"
 
-    def _handle_site_link(self, user: ChatUser, target_room: str) -> str:
-        if not self._can_manage_room(user, target_room):
-            return "owner 또는 admin만 관리 링크를 볼 수 있습니다."
-        token = self.admin_store.get_site_token_for_room_name(target_room)
-        if not token:
-            return (
-                f"'{target_room}' 방의 전용 링크가 아직 없습니다.\n"
-                "봇이 그 방의 메시지를 한 번 받은 뒤 다시 시도해 주세요."
-            )
+    def _site_link_url(self, token: str) -> str:
         base = os.getenv("SITE_BASE_URL", "").strip().rstrip("/")
-        path = f"/r/{token}"
-        link = f"{base}{path}" if base else path
-        return (
-            f"🔗 '{target_room}' 방 전용 관리 링크\n"
-            "━━━━━━━━━━━━━━\n"
-            f"{link}\n"
-            "\n"
-            "이 링크 하나로 그 방 명령어만 관리해요.\n"
-            "방 제목이 바뀌어도 같은 링크를 쓰면 됩니다.\n"
-            "※ 링크를 아는 사람은 편집할 수 있으니\n"
-            "  방 비밀번호를 함께 설정해 주세요."
-        )
+        return f"{base}/r/{token}" if base else f"/r/{token}"
+
+    def _handle_site_link(self, user: ChatUser, query: str) -> BotResponse:
+        # 공개 오픈채팅방에는 링크를 절대 노출하지 않는다. 답장이 방 전체에
+        # 보이므로 일반 사용자에게 관리 사이트가 새어나가기 때문이다.
+        if not user.room.startswith("개인톡:"):
+            if not self.admin_store.is_admin_or_owner(user):
+                return BotResponse("", silent=True)
+            return BotResponse(
+                "🔒 보안상 관리 링크는 채팅방에 띄우지 않아요.\n"
+                "봇과의 1:1 개인톡에서 /관리링크 를\n"
+                "입력하면 링크를 알려드려요."
+            )
+        # 개인톡: 봇 소유자(오너)만. 링크는 여기서만 노출된다.
+        if not self.admin_store.is_owner(user):
+            return BotResponse("관리 링크는 봇 오너만 확인할 수 있어요.")
+
+        arg = query.strip()
+        if arg:
+            target = normalize_room(arg)
+            token = self.admin_store.get_site_token_for_room_name(target)
+            if not token:
+                return BotResponse(
+                    f"'{target}' 방을 찾지 못했어요.\n"
+                    "봇이 그 방 메시지를 한 번 받은 뒤 다시 시도해 주세요."
+                )
+            return BotResponse(
+                f"🔗 '{target}' 전용 관리 링크\n"
+                "━━━━━━━━━━━━━━\n"
+                f"{self._site_link_url(token)}\n"
+                "\n"
+                "※ 링크와 방 비밀번호를 함께 구독자에게 전달하세요."
+            )
+
+        rooms = self.admin_store.list_rooms()
+        if not rooms:
+            return BotResponse(
+                "아직 등록된 방이 없어요.\n"
+                "봇을 방에 초대하고 메시지가 한 번 오면 등록돼요."
+            )
+        lines = ["🔗 방 전용 관리 링크", "━━━━━━━━━━━━━━"]
+        for name, token in rooms:
+            lines.append(f"• {name}")
+            lines.append(f"  {self._site_link_url(token)}")
+        lines.append("")
+        lines.append("특정 방만: /관리링크 방이름")
+        lines.append("※ 링크+방 비밀번호를 구독자에게 전달하세요.")
+        return BotResponse("\n".join(lines))
 
     def _handle_owner_setup(self, user: ChatUser, code: str) -> str:
         if self.owner_setup_code in INSECURE_SETUP_CODES:
