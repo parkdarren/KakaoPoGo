@@ -211,6 +211,16 @@ RAID_GUIDE = (
     "/마감 포켓몬이름 모집자\n"
     "→ 최종 명단 정리 + 마무리"
 )
+RAID_APPLY_GUIDE = (
+    "🙌 레이드 신청은 /참가 로 해요!\n"
+    "━━━━━━━━━━━━━━\n"
+    "/참가 게임닉네임 포켓몬이름 모집자\n"
+    "예) /참가 GoTrainer 오리진디아루가 RaidMaster\n"
+    "\n"
+    "🤝 모집글의 모집자 친구코드로 친추 먼저!\n"
+    "👀 진행 중인 모집 보기 → /현황\n"
+    "📖 자세한 사용법 → /레이드하는법"
+)
 ADMIN_COMMANDS = [
     "/취소랭킹",
     "/레이드초기화 전체(또는 포켓몬이름 모집자)",
@@ -291,6 +301,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "raid_open", query
     if command in ("참가", "레이드참가"):
         return "raid_join", query
+    if command in ("신청",):
+        return "raid_apply_guide", query
     if command in ("취소", "레이드취소", "레이드참가취소", "레이드빠짐"):
         return "raid_leave", query
     if command in ("현황", "레이드현황", "레이드명단", "레이드목록"):
@@ -410,6 +422,9 @@ class PokemonGoBot:
 
         if command == "raid_guide":
             return BotResponse(fold_long_reply(RAID_GUIDE))
+
+        if command == "raid_apply_guide":
+            return BotResponse(RAID_APPLY_GUIDE)
 
         if command == "raid_cancel_stats":
             return BotResponse(self._handle_raid_cancel_stats(user))
@@ -1355,6 +1370,7 @@ class PokemonGoBot:
             "레이드모집",
             "참가",
             "레이드참가",
+            "신청",
             "취소",
             "레이드참가취소",
             "레이드취소",

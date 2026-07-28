@@ -47,6 +47,7 @@ def test_parse_new_commands() -> None:
     assert parse_command("/카운터 뮤츠") == ("counter", "뮤츠")
     assert parse_command("/리그 마릴리") == ("league", "마릴리")
     assert parse_command("/pvp") == ("custom_run", "pvp")
+    assert parse_command("/신청") == ("raid_apply_guide", "")
     assert parse_command("/포켓몬고이벤트") == ("events", "")
     assert parse_command("/이벤트") == ("events", "")
     assert parse_command("/일정") == ("events", "")
