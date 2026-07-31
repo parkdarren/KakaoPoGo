@@ -1277,33 +1277,56 @@ class PokemonGoBot:
             return f"'{nickname}' 님은 경고 기록이 없어요."
         return f"✅ {nickname} 님의 경고 {removed}건을 지웠어요."
 
+    @staticmethod
+    def _split_nicknames(query: str) -> list[str]:
+        # 여러 명은 쉼표로 구분한다. 닉네임에 공백이 있어도 되도록 쉼표만 나눈다.
+        return [name.strip() for name in query.split(",") if name.strip()]
+
     def _handle_warn_grant(self, user: ChatUser, query: str, target_room: str) -> str:
         if not self.admin_store.is_owner(user):
             return "오너만 경고 권한을 부여할 수 있습니다."
-        nickname = query.strip()
-        if not nickname:
-            return "형식은 이렇게예요.\n/경고권한부여 카톡닉네임"
-        user_key = self.admin_store.resolve_user_key_by_nickname(target_room, nickname)
-        if not user_key:
-            return (
-                f"'{nickname}' 님을 찾지 못했어요.\n"
-                "그 사람이 대상방에서 채팅을 한 번 해야 합니다.\n"
-                "(대상방은 /대상방설정 으로 지정하세요.)"
+        names = self._split_nicknames(query)
+        if not names:
+            return "형식은 이렇게예요.\n/경고권한부여 닉네임\n여러 명: /경고권한부여 닉1,닉2,닉3"
+        granted, missing = [], []
+        for name in names:
+            user_key = self.admin_store.resolve_user_key_by_nickname(target_room, name)
+            if not user_key:
+                missing.append(name)
+                continue
+            current = self.admin_store.latest_nickname(target_room, user_key) or name
+            self.admin_store.grant_warn_permission(
+                target_room, user_key, current, user.sender
             )
-        current = self.admin_store.latest_nickname(target_room, user_key) or nickname
-        self.admin_store.grant_warn_permission(target_room, user_key, current, user.sender)
-        return f"✅ {current} 님에게 '{target_room}' 방 경고 권한을 부여했어요."
+            granted.append(current)
+        lines = []
+        if granted:
+            lines.append(f"✅ '{target_room}' 경고 권한 부여 ({len(granted)}명)")
+            lines.extend(f"・ {name}" for name in granted)
+        if missing:
+            lines.append(f"❌ 못 찾음 ({len(missing)}명): {', '.join(missing)}")
+            lines.append("  (대상방에서 채팅을 한 번 한 사람만 돼요)")
+        return "\n".join(lines)
 
     def _handle_warn_revoke(self, user: ChatUser, query: str, target_room: str) -> str:
         if not self.admin_store.is_owner(user):
             return "오너만 경고 권한을 해제할 수 있습니다."
-        nickname = query.strip()
-        if not nickname:
-            return "형식은 이렇게예요.\n/경고권한해제 카톡닉네임"
-        user_key = self.admin_store.resolve_user_key_by_nickname(target_room, nickname)
-        if not user_key or not self.admin_store.revoke_warn_permission(target_room, user_key):
-            return f"'{nickname}' 님은 경고 권한이 없어요."
-        return f"✅ {nickname} 님의 '{target_room}' 방 경고 권한을 해제했어요."
+        names = self._split_nicknames(query)
+        if not names:
+            return "형식은 이렇게예요.\n/경고권한해제 닉네임\n여러 명: /경고권한해제 닉1,닉2"
+        revoked, missing = [], []
+        for name in names:
+            user_key = self.admin_store.resolve_user_key_by_nickname(target_room, name)
+            if user_key and self.admin_store.revoke_warn_permission(target_room, user_key):
+                revoked.append(name)
+            else:
+                missing.append(name)
+        lines = []
+        if revoked:
+            lines.append(f"✅ 경고 권한 해제 ({len(revoked)}명): {', '.join(revoked)}")
+        if missing:
+            lines.append(f"❌ 권한이 없던 사람 ({len(missing)}명): {', '.join(missing)}")
+        return "\n".join(lines)
 
     def _handle_warn_perm_list(self, user: ChatUser, target_room: str) -> str:
         if not self.admin_store.is_owner(user):

@@ -440,7 +440,7 @@ async def test_warn_permission_grant_flow(tmp_path) -> None:
     # 오너가 개인톡에서 대상방 지정 후 권한 부여.
     await bot.handle("/대상방설정 종합방", room="개인톡:o", sender="오너", user_key="iris:owner")
     granted = await bot.handle("/경고권한부여 모더", room="개인톡:o", sender="오너", user_key="iris:owner")
-    assert "경고 권한을 부여" in granted.reply
+    assert "경고 권한 부여" in granted.reply
 
     # 이제 모더가 종합방에서 경고를 쓸 수 있다.
     after = await bot.handle("/경고추가 말썽꾼 도배", room="종합방", sender="모더", user_key="iris:mod")
@@ -470,6 +470,33 @@ async def test_warning_add_needs_known_nickname(tmp_path) -> None:
     assert "경고 등록" in ok.reply
     listing = await bot.handle("/경고", room="방", sender="관리자", user_key="iris:boss")
     assert "링딩 임시" in listing.reply and "도배심함" in listing.reply
+
+
+@pytest.mark.anyio
+async def test_warn_permission_grant_multiple_at_once(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    store.add_owner(ChatUser(room="개인톡:o", sender="오너", user_key="iris:owner"))
+    for key, nick in [("iris:a", "에이"), ("iris:b", "비"), ("iris:c", "링딩 임시")]:
+        store.record_chat_message("종합방", key, nick, "2026-07-31")
+    await bot.handle("/대상방설정 종합방", room="개인톡:o", sender="오너", user_key="iris:owner")
+
+    # 쉼표로 여러 명 한 번에. 공백 있는 닉네임과 못 찾는 닉네임도 섞어서.
+    reply = await bot.handle(
+        "/경고권한부여 에이, 비, 링딩 임시, 없는사람",
+        room="개인톡:o",
+        sender="오너",
+        user_key="iris:owner",
+    )
+    assert "부여 (3명)" in reply.reply
+    assert "링딩 임시" in reply.reply
+    assert "못 찾음 (1명)" in reply.reply and "없는사람" in reply.reply
+
+    # 셋 다 실제로 권한을 가졌는지 확인.
+    for key in ("iris:a", "iris:b", "iris:c"):
+        assert store.has_warn_permission("종합방", key)
 
 
 @pytest.mark.anyio
