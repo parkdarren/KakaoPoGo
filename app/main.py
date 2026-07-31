@@ -407,7 +407,7 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
                 # 나가거나 강퇴당한 사람은 들낙 명단에서 빠진다.
                 # 강퇴(feedType 6)는 본인 의사가 아니라 다음 복귀를 카운트 면제한다.
                 bot.handle_member_leaves(group_room, members, kicked=(feed_type == 6))
-        # (임시) 강퇴 피드의 실제 feedType 을 확인하기 위한 캡처. 확인되면 제거.
+        # (임시) 실제 강퇴 feedType 을 확인하기 위한 캡처. 확인되면 제거.
         if feed_type != 4:
             _iris_logger.warning(
                 "IRIS_LEAVE_CAPTURE feedType=%s members=%s raw=%s",
@@ -432,6 +432,11 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
 
     # 채팅 랭킹 집계: 명령어든 일반 채팅이든 도착한 메시지는 전부 센다.
     bot.record_chat(room, sender, user_key)
+    # 이미 방에 있는 사람은 첫 활동 때 '입장 1회'로 기준을 잡아둔다. 그래야
+    # 추적 시작 전부터 있던 사람도 나갔다 들어오면 자동으로 2회차가 된다.
+    member_id = str(request.json.get("user_id") or "").strip()
+    if request.room and member_id and sender != "개인톡사용자":
+        bot.admin_store.seed_member_present(normalize_room(room), member_id, sender)
     if _is_silent_message(text):
         return {"reply": "", "silent": True, "chat_id": chat_id}
 

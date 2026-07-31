@@ -1225,6 +1225,29 @@ class AdminStore:
             )
         return (new_count, True)
 
+    def seed_member_present(self, room: str, user_id: str, nickname: str) -> None:
+        """이미 방에 있는 사람을 '입장 1회'로 기준 잡는다. (추적 시작 전 멤버용)
+
+        채팅을 했다는 건 지금 방에 있다는 뜻이라, 기록이 없으면 입장 1회로
+        넣어둔다. 그래야 나중에 나갔다 들어오면 자동으로 2회차가 된다.
+        이미 기록이 있으면 닉네임만 갱신하고 입장 횟수는 건드리지 않는다.
+        """
+        room = (room or "").strip()
+        user_id = (user_id or "").strip()
+        if not room or not user_id:
+            return
+        nickname = (nickname or "").strip()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO room_join_counts
+                    (room, user_id, nickname, join_count, present, pardon_next, last_join_at)
+                VALUES (?, ?, ?, 1, 1, 0, CURRENT_TIMESTAMP)
+                ON CONFLICT(room, user_id) DO UPDATE SET nickname = excluded.nickname
+                """,
+                (room, user_id, nickname),
+            )
+
     def mark_member_left(self, room: str, user_id: str, kicked: bool = False) -> None:
         """방을 떠난 사람은 present=0 으로 둔다.
 

@@ -368,6 +368,28 @@ async def test_kicked_member_rejoin_is_not_counted(tmp_path) -> None:
     assert "입장 2회차" in warn
 
 
+@pytest.mark.anyio
+async def test_existing_member_rejoin_becomes_second_entry(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+
+    # 추적 시작 전부터 있던 사람이 채팅을 하면 '입장 1회'로 기준이 잡힌다.
+    store.seed_member_present("방", "old1", "터줏대감")
+    # 아직 재입장 전이라 들낙 명단엔 없다.
+    before = await bot.handle("/들낙", room="방", sender="관리자", user_key="iris:z")
+    assert "터줏대감" not in before.reply
+
+    # 나갔다가 다시 들어오면 곧바로 입장 2회차.
+    bot.handle_member_leaves("방", [("old1", "터줏대감")])
+    warn = bot.handle_member_joins("방", [("old1", "터줏대감")])
+    assert "입장 2회차" in warn
+
+    # seed 는 이미 있는 기록의 입장 횟수를 덮어쓰지 않는다.
+    store.seed_member_present("방", "old1", "터줏대감")
+    listing = await bot.handle("/들낙", room="방", sender="관리자", user_key="iris:z")
+    assert "터줏대감" in listing.reply and "2회" in listing.reply
+
+
 def test_parse_iris_feed_formats() -> None:
     from app.main import _parse_iris_feed
 
