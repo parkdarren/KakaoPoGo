@@ -302,6 +302,12 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "warn_add", query
     if command in ("경고삭제", "경고취소"):
         return "warn_remove", query
+    if command in ("경고권한부여", "경고권한추가"):
+        return "warn_grant", query
+    if command in ("경고권한해제", "경고권한삭제"):
+        return "warn_revoke", query
+    if command in ("경고권한목록", "경고권한명단"):
+        return "warn_perm_list", query
     if command in ("경고", "경고목록", "경고명단"):
         return "warn_list", query
     if command in ("추첨", "랜덤추첨"):
@@ -442,6 +448,15 @@ class PokemonGoBot:
 
         if command == "warn_remove":
             return BotResponse(self._handle_warn_remove(user, query))
+
+        if command == "warn_grant":
+            return BotResponse(self._handle_warn_grant(user, query, target_user.room))
+
+        if command == "warn_revoke":
+            return BotResponse(self._handle_warn_revoke(user, query, target_user.room))
+
+        if command == "warn_perm_list":
+            return BotResponse(self._handle_warn_perm_list(user, target_user.room))
 
         if command == "raffle":
             return BotResponse(self._handle_raffle(user))
@@ -1196,9 +1211,15 @@ class PokemonGoBot:
             lines.append(f"{rank}. {nickname} · 입장 {count}회")
         return fold_long_reply("\n".join(lines))
 
+    def _can_warn(self, user: ChatUser) -> bool:
+        # 경고 기능은 오너가 따로 권한을 준 사람만 쓴다(일반 admin 아님).
+        return self.admin_store.is_owner(user) or self.admin_store.has_warn_permission(
+            user.room, user.user_key
+        )
+
     def _handle_warn_add(self, user: ChatUser, query: str) -> str:
-        if not self.admin_store.is_admin_or_owner(user):
-            return "owner 또는 admin만 경고를 추가할 수 있습니다."
+        if not self._can_warn(user):
+            return "경고 권한이 있는 사람만 쓸 수 있어요. (오너에게 /경고권한부여 요청)"
         words = query.split()
         if len(words) < 2:
             return "형식은 이렇게예요.\n/경고추가 카톡닉네임 사유\n예: /경고추가 홍길동 도배"
@@ -1229,8 +1250,8 @@ class PokemonGoBot:
         return f"⚠️ 경고 등록: {current} · 누적 {count}회\n사유: {reason}"
 
     def _handle_warn_list(self, user: ChatUser) -> str:
-        if not self.admin_store.is_admin_or_owner(user):
-            return "owner 또는 admin만 경고 명단을 볼 수 있습니다."
+        if not self._can_warn(user):
+            return "경고 권한이 있는 사람만 볼 수 있어요."
         warnings = self.admin_store.list_warnings(user.room)
         if not warnings:
             return "경고 받은 사람이 없어요."
@@ -1243,8 +1264,8 @@ class PokemonGoBot:
         return fold_long_reply("\n".join(lines))
 
     def _handle_warn_remove(self, user: ChatUser, query: str) -> str:
-        if not self.admin_store.is_admin_or_owner(user):
-            return "owner 또는 admin만 경고를 삭제할 수 있습니다."
+        if not self._can_warn(user):
+            return "경고 권한이 있는 사람만 쓸 수 있어요."
         nickname = query.strip()
         if not nickname:
             return "형식은 이렇게예요.\n/경고삭제 카톡닉네임"
@@ -1255,6 +1276,46 @@ class PokemonGoBot:
         if not removed:
             return f"'{nickname}' 님은 경고 기록이 없어요."
         return f"✅ {nickname} 님의 경고 {removed}건을 지웠어요."
+
+    def _handle_warn_grant(self, user: ChatUser, query: str, target_room: str) -> str:
+        if not self.admin_store.is_owner(user):
+            return "오너만 경고 권한을 부여할 수 있습니다."
+        nickname = query.strip()
+        if not nickname:
+            return "형식은 이렇게예요.\n/경고권한부여 카톡닉네임"
+        user_key = self.admin_store.resolve_user_key_by_nickname(target_room, nickname)
+        if not user_key:
+            return (
+                f"'{nickname}' 님을 찾지 못했어요.\n"
+                "그 사람이 대상방에서 채팅을 한 번 해야 합니다.\n"
+                "(대상방은 /대상방설정 으로 지정하세요.)"
+            )
+        current = self.admin_store.latest_nickname(target_room, user_key) or nickname
+        self.admin_store.grant_warn_permission(target_room, user_key, current, user.sender)
+        return f"✅ {current} 님에게 '{target_room}' 방 경고 권한을 부여했어요."
+
+    def _handle_warn_revoke(self, user: ChatUser, query: str, target_room: str) -> str:
+        if not self.admin_store.is_owner(user):
+            return "오너만 경고 권한을 해제할 수 있습니다."
+        nickname = query.strip()
+        if not nickname:
+            return "형식은 이렇게예요.\n/경고권한해제 카톡닉네임"
+        user_key = self.admin_store.resolve_user_key_by_nickname(target_room, nickname)
+        if not user_key or not self.admin_store.revoke_warn_permission(target_room, user_key):
+            return f"'{nickname}' 님은 경고 권한이 없어요."
+        return f"✅ {nickname} 님의 '{target_room}' 방 경고 권한을 해제했어요."
+
+    def _handle_warn_perm_list(self, user: ChatUser, target_room: str) -> str:
+        if not self.admin_store.is_owner(user):
+            return "오너만 경고 권한 목록을 볼 수 있습니다."
+        keys = self.admin_store.list_warn_permissions(target_room)
+        if not keys:
+            return f"'{target_room}' 방에 경고 권한을 가진 사람이 없어요."
+        lines = [f"🔑 '{target_room}' 경고 권한 ({len(keys)}명)", "━━━━━━━━━━━━━━"]
+        for rank, key in enumerate(keys, start=1):
+            nickname = self.admin_store.latest_nickname(target_room, key) or "(닉 미확인)"
+            lines.append(f"{rank}. {nickname}")
+        return "\n".join(lines)
 
     def handle_member_joins(self, room: str, members: list[tuple[str, str]]) -> str:
         """입장 이벤트를 방별로 세고, 2회차 이상이면 의심 문구를 만든다."""
@@ -1577,6 +1638,12 @@ class PokemonGoBot:
             "경고추가",
             "경고삭제",
             "경고취소",
+            "경고권한부여",
+            "경고권한추가",
+            "경고권한해제",
+            "경고권한삭제",
+            "경고권한목록",
+            "경고권한명단",
             "경고",
             "경고목록",
             "경고명단",

@@ -417,9 +417,39 @@ async def test_warning_tracks_by_id_across_nickname_change(tmp_path) -> None:
     assert "김철수" in listed.reply  # 바뀐 닉네임으로 표시
     assert "도배" in listed.reply
 
-    # 일반 사용자는 경고를 못 넣는다.
+    # 권한 없는 사용자는 경고를 못 넣는다.
     denied = await bot.handle("/경고추가 홍길동 사유", room="방", sender="행인", user_key="iris:rando")
-    assert "owner 또는 admin" in denied.reply
+    assert "경고 권한" in denied.reply
+
+
+@pytest.mark.anyio
+async def test_warn_permission_grant_flow(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    store.add_owner(ChatUser(room="개인톡:o", sender="오너", user_key="iris:owner"))
+    # 대상 모더레이터와 경고 대상이 종합방에서 채팅한 적 있다.
+    store.record_chat_message("종합방", "iris:mod", "모더", "2026-07-31")
+    store.record_chat_message("종합방", "iris:target", "말썽꾼", "2026-07-31")
+
+    # 권한 없는 모더는 아직 경고 못 씀.
+    before = await bot.handle("/경고추가 말썽꾼 도배", room="종합방", sender="모더", user_key="iris:mod")
+    assert "경고 권한" in before.reply
+
+    # 오너가 개인톡에서 대상방 지정 후 권한 부여.
+    await bot.handle("/대상방설정 종합방", room="개인톡:o", sender="오너", user_key="iris:owner")
+    granted = await bot.handle("/경고권한부여 모더", room="개인톡:o", sender="오너", user_key="iris:owner")
+    assert "경고 권한을 부여" in granted.reply
+
+    # 이제 모더가 종합방에서 경고를 쓸 수 있다.
+    after = await bot.handle("/경고추가 말썽꾼 도배", room="종합방", sender="모더", user_key="iris:mod")
+    assert "경고 등록" in after.reply
+
+    # 오너가 권한을 해제하면 다시 막힌다.
+    await bot.handle("/경고권한해제 모더", room="개인톡:o", sender="오너", user_key="iris:owner")
+    blocked = await bot.handle("/경고 ", room="종합방", sender="모더", user_key="iris:mod")
+    assert "경고 권한" in blocked.reply
 
 
 @pytest.mark.anyio

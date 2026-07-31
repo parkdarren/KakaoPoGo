@@ -187,6 +187,15 @@ class AdminStore:
                     warned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS warn_permissions (
+                    room TEXT NOT NULL,
+                    user_key TEXT NOT NULL,
+                    nickname TEXT NOT NULL DEFAULT '',
+                    granted_by TEXT NOT NULL DEFAULT '',
+                    granted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (room, user_key)
+                );
+
                 CREATE TABLE IF NOT EXISTS room_join_counts (
                     room TEXT NOT NULL,
                     user_id TEXT NOT NULL,
@@ -1106,6 +1115,7 @@ class AdminStore:
                 ("custom_commands", "command"),
                 ("room_admins", "user_key"),
                 ("room_join_counts", "user_id"),
+                ("warn_permissions", "user_key"),
             ):
                 conn.execute(
                     f"""
@@ -1121,6 +1131,13 @@ class AdminStore:
                     (new_room, old_room),
                 )
                 moved[table] = cursor.rowcount
+
+            # 경고 기록은 사람당 여러 건이라 중복 제거 없이 통째로 옮긴다.
+            cursor = conn.execute(
+                "UPDATE warnings SET room = ? WHERE room = ?",
+                (new_room, old_room),
+            )
+            moved["warnings"] = cursor.rowcount
 
             cursor = conn.execute(
                 "UPDATE control_room_targets SET target_room = ? WHERE target_room = ?",
@@ -1409,6 +1426,50 @@ class AdminStore:
                 (room, user_key),
             )
         return cursor.rowcount
+
+    def grant_warn_permission(
+        self, room: str, user_key: str, nickname: str, granted_by: str
+    ) -> None:
+        """그 방에서 경고 명령을 쓸 수 있는 권한을 준다."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO warn_permissions (room, user_key, nickname, granted_by)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(room, user_key) DO UPDATE SET
+                    nickname = excluded.nickname, granted_by = excluded.granted_by
+                """,
+                (room, user_key, nickname, granted_by),
+            )
+
+    def revoke_warn_permission(self, room: str, user_key: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM warn_permissions WHERE room = ? AND user_key = ?",
+                (room, user_key),
+            )
+        return cursor.rowcount > 0
+
+    def has_warn_permission(self, room: str, user_key: str) -> bool:
+        room = (room or "").strip()
+        user_key = (user_key or "").strip()
+        if not room or not user_key:
+            return False
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM warn_permissions WHERE room = ? AND user_key = ?",
+                (room, user_key),
+            ).fetchone()
+        return row is not None
+
+    def list_warn_permissions(self, room: str) -> list[str]:
+        """경고 권한을 가진 사람들의 user_key 목록."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT user_key FROM warn_permissions WHERE room = ? ORDER BY granted_at",
+                (room,),
+            ).fetchall()
+        return [row["user_key"] for row in rows]
 
     def list_rooms(self) -> list[tuple[str, str]]:
         """등록된 방과 각 전용 토큰 목록. (개인톡으로 링크 안내할 때 쓴다)"""
