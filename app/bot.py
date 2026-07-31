@@ -96,6 +96,10 @@ HELP_GREETINGS = [
 OWNER_SETUP_CODE = os.getenv("OWNER_SETUP_CODE", "")
 # 저장소에 공개된 예시 값이므로 실제 등록 코드로 인정하지 않는다.
 INSECURE_SETUP_CODES = {"", "change-me"}
+# 모든 방이 공유하는 공용 기본 명령어가 담기는 가상의 방. 어떤 방에서
+# 명령을 쳐도 그 방과 대상방에 없으면 여기서 찾는다. 실제 카톡방 이름과
+# 겹치지 않도록 예약어 형태로 둔다.
+BASE_ROOM = "__공용__"
 BUILTIN_HELP_ENTRIES = [
     (
         "/도감 포켓몬이름",
@@ -526,6 +530,10 @@ class PokemonGoBot:
                     target_user.room,
                     normalized,
                 )
+            # 방·대상방에 없으면 공용 기본(리그 순위 등)에서 찾는다.
+            # 모든 방이 기본으로 갖는 기능이라 새 방에도 자동으로 딸려온다.
+            if custom is None and user.room != BASE_ROOM:
+                custom = self.admin_store.get_custom_command(BASE_ROOM, normalized)
             if custom:
                 return BotResponse(fold_long_reply(custom.response))
             # 이 방에 등록되지 않은 명령어는 다른 봇의 것일 수 있으니 침묵한다.

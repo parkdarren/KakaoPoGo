@@ -307,6 +307,28 @@ def test_site_link_shown_only_in_owner_dm(tmp_path) -> None:
     assert "오너" in denied.reply
 
 
+@pytest.mark.anyio
+async def test_base_room_commands_are_shared_everywhere(tmp_path) -> None:
+    from app.bot import BASE_ROOM
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    store.upsert_custom_command(BASE_ROOM, "마리", "🟣 마스터리그 TOP 30", "시스템")
+    bot = PokemonGoBot(admin_store=store)
+
+    # 아무 방에서나 공용 기본 명령어가 나온다.
+    shared = await bot.handle("/마리", room="처음보는방", sender="유저", user_key="iris:1")
+    assert "마스터리그" in shared.reply
+
+    # 방이 같은 이름으로 자기 것을 등록하면 그 방에선 방 것이 우선한다.
+    store.upsert_custom_command("처음보는방", "마리", "우리 방 전용", "방장")
+    overridden = await bot.handle("/마리", room="처음보는방", sender="유저", user_key="iris:1")
+    assert overridden.reply == "우리 방 전용"
+
+    # 공용에도 없는 명령어는 조용히 무시된다.
+    unknown = await bot.handle("/없는거", room="처음보는방", sender="유저", user_key="iris:1")
+    assert unknown.silent is True
+
+
 def test_admin_web_rename_room(tmp_path, monkeypatch) -> None:
     import app.main as main_module
 
