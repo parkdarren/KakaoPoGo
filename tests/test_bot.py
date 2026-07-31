@@ -328,11 +328,21 @@ async def test_member_join_counting_is_per_room(tmp_path) -> None:
     ranking = await bot.handle("/들낙", room="A방", sender="관리자", user_key="iris:x")
     assert "들낙이" in ranking.reply and "2회" in ranking.reply
     empty_b = await bot.handle("/들낙", room="B방", sender="관리자", user_key="iris:x")
-    assert "기록이 없어요" in empty_b.reply
+    assert "없어요" in empty_b.reply and "들낙이" not in empty_b.reply
 
     # /들낙 닉네임은 특정 사람 조회.
     named = await bot.handle("/들낙 들낙이", room="A방", sender="관리자", user_key="iris:x")
     assert "들낙이" in named.reply and "2회차" in named.reply
+
+    # 내보내면(퇴장·강퇴) 현재 인원에서 빠져 명단에 안 나온다.
+    bot.handle_member_leaves("A방", [("u1", "들낙이")])
+    after_kick = await bot.handle("/들낙", room="A방", sender="관리자", user_key="iris:x")
+    assert "들낙이" not in after_kick.reply
+
+    # 다시 들어오면 카운트를 이어받아 다시 명단에 뜬다.
+    bot.handle_member_joins("A방", [("u1", "들낙이")])
+    rejoined = await bot.handle("/들낙", room="A방", sender="관리자", user_key="iris:x")
+    assert "들낙이" in rejoined.reply and "3회" in rejoined.reply
 
 
 def test_parse_iris_feed_formats() -> None:

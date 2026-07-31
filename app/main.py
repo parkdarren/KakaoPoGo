@@ -335,11 +335,15 @@ def _parse_iris_feed(payload: dict[str, Any]) -> tuple[int, list[tuple[str, str]
     feed_type = data.get("feedType")
     if feed_type is None:
         return None
-    if feed_type == 4:
+    if feed_type == 4:  # 입장
         raw_members = data.get("members") or []
-    elif feed_type == 2:
-        member = data.get("member")
-        raw_members = [member] if member else []
+    elif feed_type in (2, 6):  # 2=나감, 6=강퇴
+        if data.get("members"):
+            raw_members = data.get("members")
+        elif data.get("member"):
+            raw_members = [data.get("member")]
+        else:
+            raw_members = []
     else:
         raw_members = []
     members = [
@@ -397,6 +401,9 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
                 if warning:
                     await _enqueue_iris_reply(chat_id, warning)
                     return {"reply": warning, "silent": False, "chat_id": chat_id}
+            elif feed_type in (2, 6) and members:
+                # 나가거나 강퇴당한 사람은 들낙 명단에서 빠진다.
+                bot.handle_member_leaves(group_room, members)
         return {"reply": "", "silent": True, "chat_id": chat_id}
 
     # 1:1 개인톡방은 room·sender가 없다. room은 chat_id로 고유하게 잡고,

@@ -1175,11 +1175,11 @@ class PokemonGoBot:
 
         ranking = self.admin_store.join_ranking(user.room, min_count=2)
         if not ranking:
-            return "아직 재입장(들낙) 기록이 없어요."
-        lines = ["👀 들낙 랭킹 (입장 2회 이상)", "━━━━━━━━━━━━━━"]
+            return "지금 방에 재입장(들낙) 기록이 있는 사람이 없어요."
+        lines = [f"👀 들낙 명단 (재입장자 {len(ranking)}명)", "━━━━━━━━━━━━━━"]
         for rank, (nickname, count) in enumerate(ranking, start=1):
-            lines.append(f"{rank}. {nickname} · {count}회")
-        return "\n".join(lines)
+            lines.append(f"{rank}. {nickname} · 입장 {count}회")
+        return fold_long_reply("\n".join(lines))
 
     def handle_member_joins(self, room: str, members: list[tuple[str, str]]) -> str:
         """입장 이벤트를 방별로 세고, 2회차 이상이면 의심 문구를 만든다."""
@@ -1192,6 +1192,12 @@ class PokemonGoBot:
         if not suspects:
             return ""
         return "👀 들낙 유저 의심\n" + "\n".join(suspects)
+
+    def handle_member_leaves(self, room: str, members: list[tuple[str, str]]) -> None:
+        """퇴장·강퇴한 사람은 현재 인원에서 빼서 들낙 명단에 안 나오게 한다."""
+        clean_room = normalize_room(room) or "local"
+        for user_id, _nickname in members:
+            self.admin_store.mark_member_left(clean_room, user_id)
 
     @staticmethod
     def _daily_pick(seed: str, options: list[str]) -> str:

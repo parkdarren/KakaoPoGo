@@ -182,6 +182,7 @@ class AdminStore:
                     user_id TEXT NOT NULL,
                     nickname TEXT NOT NULL DEFAULT '',
                     join_count INTEGER NOT NULL DEFAULT 0,
+                    present INTEGER NOT NULL DEFAULT 1,
                     last_join_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (room, user_id)
                 );
@@ -214,6 +215,7 @@ class AdminStore:
             self._ensure_column(conn, "custom_commands", "taught_by", "TEXT")
             self._ensure_column(conn, "custom_commands", "taught_at", "TEXT")
             self._ensure_column(conn, "custom_commands", "help_order", "INTEGER")
+            self._ensure_column(conn, "room_join_counts", "present", "INTEGER NOT NULL DEFAULT 1")
             conn.execute(
                 """
                 UPDATE custom_commands
@@ -1197,35 +1199,50 @@ class AdminStore:
             new_count = (row["join_count"] if row else 0) + 1
             conn.execute(
                 """
-                INSERT INTO room_join_counts (room, user_id, nickname, join_count, last_join_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO room_join_counts
+                    (room, user_id, nickname, join_count, present, last_join_at)
+                VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
                 ON CONFLICT(room, user_id) DO UPDATE SET
                     join_count = excluded.join_count,
                     nickname = excluded.nickname,
+                    present = 1,
                     last_join_at = CURRENT_TIMESTAMP
                 """,
                 (room, user_id, nickname, new_count),
             )
         return new_count
 
-    def join_ranking(
-        self, room: str, min_count: int = 2, limit: int = 20
-    ) -> list[tuple[str, int]]:
-        """재입장(들낙)한 사람들을 횟수 많은 순으로. (닉네임, 입장횟수)"""
+    def mark_member_left(self, room: str, user_id: str) -> None:
+        """퇴장·강퇴로 방을 떠난 사람은 present=0 으로 둔다.
+
+        입장 횟수는 남겨서 다시 들어오면 이어 세지만, 현재 방에 없으므로
+        들낙 목록에서는 빠진다.
+        """
+        room = (room or "").strip()
+        user_id = (user_id or "").strip()
+        if not room or not user_id:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE room_join_counts SET present = 0 WHERE room = ? AND user_id = ?",
+                (room, user_id),
+            )
+
+    def join_ranking(self, room: str, min_count: int = 2) -> list[tuple[str, int]]:
+        """현재 방에 있는 재입장(들낙) 인원 전원을 횟수 많은 순으로."""
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT nickname, join_count FROM room_join_counts
-                WHERE room = ? AND join_count >= ?
+                WHERE room = ? AND join_count >= ? AND present = 1
                 ORDER BY join_count DESC, last_join_at DESC
-                LIMIT ?
                 """,
-                (room, min_count, limit),
+                (room, min_count),
             ).fetchall()
         return [(row["nickname"], row["join_count"]) for row in rows]
 
     def join_count_for_nickname(self, room: str, nickname: str) -> tuple[str, int] | None:
-        """닉네임으로 그 사람의 입장 횟수를 찾는다(가장 최근 닉네임 기준)."""
+        """닉네임으로 현재 방에 있는 그 사람의 입장 횟수를 찾는다."""
         nickname = (nickname or "").strip()
         if not nickname:
             return None
@@ -1233,7 +1250,7 @@ class AdminStore:
             row = conn.execute(
                 """
                 SELECT nickname, join_count FROM room_join_counts
-                WHERE room = ? AND nickname = ?
+                WHERE room = ? AND nickname = ? AND present = 1
                 ORDER BY last_join_at DESC LIMIT 1
                 """,
                 (room, nickname),
