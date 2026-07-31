@@ -390,6 +390,86 @@ async def test_existing_member_rejoin_becomes_second_entry(tmp_path) -> None:
     assert "터줏대감" in listing.reply and "2회" in listing.reply
 
 
+def test_daily_brief_groups_today_and_tomorrow() -> None:
+    from datetime import datetime, timedelta
+
+    from app.events import KST, PokemonGoEvent, format_daily_brief
+
+    now = datetime(2026, 8, 1, 9, 0, tzinfo=KST)
+
+    def event(name, start, end, kind="event"):
+        return PokemonGoEvent(name=name, event_type=kind, start=start, end=end)
+
+    events = [
+        event("오늘시작", now, now + timedelta(days=3), "community-day"),
+        event("오늘종료", now - timedelta(days=2), now + timedelta(hours=6)),
+        event("내일시작", now + timedelta(days=1), now + timedelta(days=2)),
+        event("한참뒤", now + timedelta(days=9), now + timedelta(days=10)),
+        event("진행중", now - timedelta(days=3), now + timedelta(days=3)),
+    ]
+
+    brief = format_daily_brief(events, now=now)
+    assert "🎉 오늘 시작" in brief and "오늘시작" in brief
+    assert "커뮤니티 데이" in brief  # 이벤트 종류는 한글로
+    assert "⏰ 오늘 종료" in brief and "오늘종료" in brief
+    assert "🔜 내일 시작" in brief and "내일시작" in brief
+    # 오늘과 무관한 일정은 브리핑에 넣지 않는다.
+    assert "한참뒤" not in brief and "진행중" not in brief
+
+    # 알릴 게 없으면 빈 문자열이라 아무것도 보내지 않는다.
+    assert format_daily_brief([events[3]], now=now) == ""
+
+
+@pytest.mark.anyio
+async def test_daily_brief_sends_once_per_day(tmp_path, monkeypatch) -> None:
+    from datetime import datetime, timedelta
+
+    import app.main as main_module
+    from app.events import KST, EventSchedule, PokemonGoEvent
+
+    test_bot = PokemonGoBot(admin_store=AdminStore(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(main_module, "bot", test_bot)
+    now = datetime(2026, 8, 1, 9, 0, tzinfo=KST)
+
+    class StubEvents:
+        async def get_schedule(self):
+            return EventSchedule(
+                events=[
+                    PokemonGoEvent(
+                        name="오늘시작",
+                        event_type="event",
+                        start=now,
+                        end=now + timedelta(days=1),
+                    )
+                ],
+                raids=[],
+            )
+
+    test_bot.event_client = StubEvents()
+    test_bot.admin_store.touch_room("CHAT-1", "우리방")
+    test_bot.admin_store.set_event_notify("우리방", True)
+    main_module._iris_outbox.clear()
+
+    sent = await main_module.send_daily_briefs(now)
+    assert sent == ["우리방"]
+    assert len(main_module._iris_outbox) == 1
+    assert main_module._iris_outbox[0]["room"] == "CHAT-1"
+    assert "오늘시작" in main_module._iris_outbox[0]["data"]
+
+    # 같은 날 다시 돌아도 중복 발송하지 않는다.
+    assert await main_module.send_daily_briefs(now) == []
+    assert len(main_module._iris_outbox) == 1
+
+    # 날이 바뀌면 그날 몫을 다시 보낸다(이 이벤트는 이튿날 종료).
+    assert await main_module.send_daily_briefs(now + timedelta(days=1)) == ["우리방"]
+    assert len(main_module._iris_outbox) == 2
+    assert "오늘 종료" in main_module._iris_outbox[1]["data"]
+    # 알림을 끈 방은 대상에서 빠진다.
+    test_bot.admin_store.set_event_notify("우리방", False)
+    assert test_bot.admin_store.event_notify_targets("2026-08-03") == []
+    main_module._iris_outbox.clear()
+
+
 def test_weather_boost_formatting() -> None:
     from datetime import datetime
 

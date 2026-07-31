@@ -187,6 +187,12 @@ class AdminStore:
                     warned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS event_notifications (
+                    room TEXT PRIMARY KEY,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    last_sent_date TEXT NOT NULL DEFAULT ''
+                );
+
                 CREATE TABLE IF NOT EXISTS warn_permissions (
                     room TEXT NOT NULL,
                     user_key TEXT NOT NULL,
@@ -1139,6 +1145,17 @@ class AdminStore:
             )
             moved["warnings"] = cursor.rowcount
 
+            # 방 단위 설정은 새 이름 쪽을 남기고 옛 이름 것을 옮긴다.
+            conn.execute(
+                "DELETE FROM event_notifications WHERE room = ? AND EXISTS "
+                "(SELECT 1 FROM event_notifications WHERE room = ?)",
+                (old_room, new_room),
+            )
+            conn.execute(
+                "UPDATE event_notifications SET room = ? WHERE room = ?",
+                (new_room, old_room),
+            )
+
             cursor = conn.execute(
                 "UPDATE control_room_targets SET target_room = ? WHERE target_room = ?",
                 (new_room, old_room),
@@ -1498,6 +1515,55 @@ class AdminStore:
                 (room,),
             ).fetchall()
         return [row["user_key"] for row in rows]
+
+    def set_event_notify(self, room: str, enabled: bool) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO event_notifications (room, enabled) VALUES (?, ?)
+                ON CONFLICT(room) DO UPDATE SET enabled = excluded.enabled
+                """,
+                (room, 1 if enabled else 0),
+            )
+
+    def is_event_notify_enabled(self, room: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT enabled FROM event_notifications WHERE room = ?", (room,)
+            ).fetchone()
+        return bool(row and row["enabled"])
+
+    def event_notify_targets(self, today: str) -> list[str]:
+        """오늘 아직 브리핑을 못 받은, 알림 켜진 방 목록."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT room FROM event_notifications
+                WHERE enabled = 1 AND last_sent_date != ?
+                """,
+                (today,),
+            ).fetchall()
+        return [row["room"] for row in rows]
+
+    def mark_event_notify_sent(self, room: str, today: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE event_notifications SET last_sent_date = ? WHERE room = ?",
+                (today, room),
+            )
+
+    def get_chat_id_for_room(self, room_name: str) -> str | None:
+        """방 이름으로 chat_id를 찾는다. 알림을 보낼 때 필요하다."""
+        name = (room_name or "").strip()
+        if not name:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT chat_id FROM rooms WHERE room_name = ? "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (name,),
+            ).fetchone()
+        return row["chat_id"] if row else None
 
     def list_rooms(self) -> list[tuple[str, str]]:
         """등록된 방과 각 전용 토큰 목록. (개인톡으로 링크 안내할 때 쓴다)"""

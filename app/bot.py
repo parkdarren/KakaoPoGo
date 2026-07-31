@@ -295,6 +295,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "weather", query
     if command in ("부스트", "날씨부스트", "boost"):
         return "boost", query
+    if command in ("이벤트알림", "일정알림"):
+        return "event_notify", query
     if command in ("오늘의포켓몬", "출첵", "출석", "ㅊㅊ"):
         return "daily", query
     if command in ("출석랭킹", "출첵랭킹"):
@@ -526,6 +528,11 @@ class PokemonGoBot:
                     "날씨 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
                 )
             return BotResponse(fold_long_reply(format_boost(weather, query)))
+
+        if command == "event_notify":
+            return BotResponse(
+                self._handle_event_notify(user, query, target_user.room)
+            )
 
         if command == "owner_setup":
             return BotResponse(self._handle_owner_setup(user, query))
@@ -814,6 +821,32 @@ class PokemonGoBot:
         lines.append("특정 방만: /관리링크 방이름")
         lines.append("※ 링크+방 비밀번호를 구독자에게 전달하세요.")
         return BotResponse("\n".join(lines))
+
+    def _handle_event_notify(self, user: ChatUser, query: str, target_room: str) -> str:
+        if not self._can_manage_room(user, target_room):
+            return "owner 또는 admin만 이벤트 알림을 설정할 수 있습니다."
+        choice = query.strip()
+        if choice in ("켜기", "on", "켜"):
+            if not self.admin_store.get_chat_id_for_room(target_room):
+                return (
+                    f"'{target_room}' 방을 아직 인식하지 못했어요.\n"
+                    "그 방에서 메시지가 한 번 오면 켤 수 있어요."
+                )
+            self.admin_store.set_event_notify(target_room, True)
+            return (
+                f"🔔 '{target_room}' 이벤트 알림을 켰어요.\n"
+                "매일 아침 오늘 시작·종료되는 이벤트와\n"
+                "내일 시작하는 이벤트를 알려드려요."
+            )
+        if choice in ("끄기", "off", "꺼"):
+            self.admin_store.set_event_notify(target_room, False)
+            return f"🔕 '{target_room}' 이벤트 알림을 껐어요."
+        state = "켜짐" if self.admin_store.is_event_notify_enabled(target_room) else "꺼짐"
+        return (
+            f"'{target_room}' 이벤트 알림: {state}\n"
+            "/이벤트알림 켜기\n"
+            "/이벤트알림 끄기"
+        )
 
     def _handle_owner_setup(self, user: ChatUser, code: str) -> str:
         if self.owner_setup_code in INSECURE_SETUP_CODES:
@@ -1690,6 +1723,8 @@ class PokemonGoBot:
             "부스트",
             "날씨부스트",
             "boost",
+            "이벤트알림",
+            "일정알림",
             "오늘의포켓몬",
             "출첵",
             "출석",

@@ -29,6 +29,7 @@ EVENT_TYPE_KO = {
     "event": "이벤트",
     "go-battle-league": "GO 배틀리그",
     "go-pass": "GO 패스",
+    "max-battles": "맥스 배틀",
     "max-mondays": "맥스 먼데이",
     "pokemon-go-fest": "GO Fest",
     "pokemon-spotlight-hour": "스포트라이트 아워",
@@ -232,6 +233,41 @@ def format_event_schedule(
 
     lines.append(f"출처: {SOURCE_CREDIT}")
     return "\n".join(lines).rstrip()
+
+
+def format_daily_brief(
+    events: list[PokemonGoEvent],
+    *,
+    now: datetime | None = None,
+) -> str:
+    """아침에 방으로 보낼 브리핑. 알릴 게 없으면 빈 문자열을 준다."""
+    now = _ensure_local(now or datetime.now(KST))
+    today = now.date()
+    tomorrow = today + timedelta(days=1)
+
+    starting = [e for e in events if e.start.date() == today]
+    ending = [e for e in events if e.end.date() == today and e.start.date() != today]
+    upcoming = [e for e in events if e.start.date() == tomorrow]
+    if not (starting or ending or upcoming):
+        return ""
+
+    def entry(event: PokemonGoEvent) -> str:
+        type_name = EVENT_TYPE_KO.get(event.event_type, event.event_type)
+        return f"・[{type_name}] {event.name}"
+
+    lines = [f"📅 오늘의 포켓몬GO ({_format_date(now)})", "━━━━━━━━━━━━━━"]
+    for title, group in (
+        ("🎉 오늘 시작", starting),
+        ("⏰ 오늘 종료", ending),
+        ("🔜 내일 시작", upcoming),
+    ):
+        if not group:
+            continue
+        lines.append(title)
+        lines.extend(entry(event) for event in sorted(group, key=lambda e: e.start))
+        lines.append("")
+    lines.append("자세히 → /포켓몬고이벤트")
+    return "\n".join(lines)
 
 
 def _format_event_section(

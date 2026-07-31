@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.admin_page import ADMIN_PAGE
 from app.site_page import SITE_PAGE
 from app.bot import PokemonGoBot, normalize_room, parse_command
+from app.events import KST, EventDataUnavailableError, format_daily_brief
 from app.pogo_api import PogoApiClient, format_dex_reply
 
 
@@ -49,6 +51,9 @@ app = FastAPI(title="KakaoPoGo Bot", version="0.1.0")
 bot = PokemonGoBot()
 pogo = PogoApiClient()
 _iris_logger = logging.getLogger("iris")
+# 아침 브리핑을 보낼 시각(KST)과 확인 주기.
+BRIEF_HOUR = int(os.getenv("EVENT_BRIEF_HOUR", "9"))
+BRIEF_CHECK_SECONDS = int(os.getenv("EVENT_BRIEF_CHECK_SECONDS", "600"))
 
 KAKAO_CHANNEL_ALLOWED_COMMANDS = {
     "help",
@@ -362,6 +367,53 @@ def _parse_iris_feed(payload: dict[str, Any]) -> tuple[int, list[tuple[str, str]
 _iris_outbox: list[dict[str, str]] = []
 _iris_outbox_lock = asyncio.Lock()
 _IRIS_OUTBOX_MAX = 500
+
+
+async def send_daily_briefs(now: datetime | None = None) -> list[str]:
+    """알림을 켠 방에 오늘의 이벤트 브리핑을 한 번씩 보낸다.
+
+    이미 오늘 보낸 방은 건너뛴다. 보낸 방 이름 목록을 돌려준다.
+    """
+    now = now or datetime.now(KST)
+    today = now.date().isoformat()
+    targets = bot.admin_store.event_notify_targets(today)
+    if not targets:
+        return []
+
+    try:
+        schedule = await bot.event_client.get_schedule()
+    except EventDataUnavailableError:
+        return []
+    brief = format_daily_brief(schedule.events, now=now)
+
+    sent = []
+    for room in targets:
+        chat_id = bot.admin_store.get_chat_id_for_room(room)
+        if not chat_id:
+            continue
+        # 알릴 내용이 없는 날도 '오늘 보냄'으로 찍어 하루 한 번만 확인한다.
+        if brief:
+            await _enqueue_iris_reply(chat_id, brief)
+            sent.append(room)
+        bot.admin_store.mark_event_notify_sent(room, today)
+    return sent
+
+
+async def _daily_brief_loop() -> None:
+    # 폰이 폴링해 가는 구조라 서버는 정해진 시각 이후에 큐에 넣기만 하면 된다.
+    while True:
+        try:
+            now = datetime.now(KST)
+            if now.hour >= BRIEF_HOUR:
+                await send_daily_briefs(now)
+        except Exception:  # 알림 실패가 봇 전체를 멈추게 두지 않는다.
+            _iris_logger.exception("daily brief failed")
+        await asyncio.sleep(BRIEF_CHECK_SECONDS)
+
+
+@app.on_event("startup")
+async def _start_daily_brief() -> None:
+    app.state.daily_brief_task = asyncio.create_task(_daily_brief_loop())
 
 
 async def _enqueue_iris_reply(chat_id: str, reply: str) -> None:
