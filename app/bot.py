@@ -1268,16 +1268,39 @@ class PokemonGoBot:
     def _handle_warn_remove(self, user: ChatUser, query: str) -> str:
         if not self._can_warn(user):
             return "경고 권한이 있는 사람만 쓸 수 있어요."
-        nickname = query.strip()
-        if not nickname:
-            return "형식은 이렇게예요.\n/경고삭제 카톡닉네임"
-        user_key = self.admin_store.resolve_user_key_by_nickname(user.room, nickname)
-        if not user_key:
-            return f"'{nickname}' 님을 찾지 못했어요."
-        removed = self.admin_store.remove_warnings(user.room, user_key)
-        if not removed:
-            return f"'{nickname}' 님은 경고 기록이 없어요."
-        return f"✅ {nickname} 님의 경고 {removed}건을 지웠어요."
+        stripped = query.strip()
+        if not stripped:
+            return (
+                "형식은 이렇게예요.\n"
+                "/경고삭제 카톡닉네임 → 그 사람 경고 전부 삭제\n"
+                "/경고삭제 카톡닉네임 사유 → 그 사유 1건만 삭제"
+            )
+        # 전체가 닉네임이면 전부 삭제, 뒤에 사유가 붙어 있으면 그 1건만 삭제한다.
+        user_key = self.admin_store.resolve_user_key_by_nickname(user.room, stripped)
+        if user_key:
+            removed = self.admin_store.remove_warnings(user.room, user_key)
+            if not removed:
+                return f"'{stripped}' 님은 경고 기록이 없어요."
+            return f"✅ {stripped} 님의 경고 {removed}건을 모두 지웠어요."
+
+        words = stripped.split()
+        for split_at in range(len(words) - 1, 0, -1):
+            nickname = " ".join(words[:split_at])
+            key = self.admin_store.resolve_user_key_by_nickname(user.room, nickname)
+            if not key:
+                continue
+            reason = " ".join(words[split_at:]).strip()
+            if self.admin_store.remove_one_warning(user.room, key, reason):
+                left = len(self.admin_store.warning_reasons(user.room, key))
+                return f"✅ {nickname} 님의 '{reason}' 경고 1건을 지웠어요. (남은 경고 {left}회)"
+            reasons = self.admin_store.warning_reasons(user.room, key)
+            if not reasons:
+                return f"'{nickname}' 님은 경고 기록이 없어요."
+            return (
+                f"'{nickname}' 님에게 '{reason}' 사유의 경고가 없어요.\n"
+                f"남은 사유: {', '.join(reasons)}"
+            )
+        return f"'{words[0]}' 님을 찾지 못했어요."
 
     @staticmethod
     def _split_nicknames(query: str) -> list[str]:

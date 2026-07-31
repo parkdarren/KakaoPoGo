@@ -473,6 +473,38 @@ async def test_warning_add_needs_known_nickname(tmp_path) -> None:
 
 
 @pytest.mark.anyio
+async def test_warn_remove_single_reason_or_all(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    store.add_owner(ChatUser(room="개인톡:o", sender="오너", user_key="iris:owner"))
+    store.record_chat_message("방", "iris:t", "말썽꾼", "2026-07-31")
+    owner = {"room": "방", "sender": "오너", "user_key": "iris:owner"}
+
+    await bot.handle("/경고추가 말썽꾼 도배", **owner)
+    await bot.handle("/경고추가 말썽꾼 욕설", **owner)
+    await bot.handle("/경고추가 말썽꾼 광고", **owner)
+
+    # 사유를 주면 그 1건만 지운다.
+    one = await bot.handle("/경고삭제 말썽꾼 욕설", **owner)
+    assert "1건을 지웠어요" in one.reply and "남은 경고 2회" in one.reply
+    listed = await bot.handle("/경고", **owner)
+    assert "욕설" not in listed.reply
+    assert "도배" in listed.reply and "광고" in listed.reply
+
+    # 없는 사유를 주면 지우지 않고 남은 사유를 알려준다.
+    missing = await bot.handle("/경고삭제 말썽꾼 없는사유", **owner)
+    assert "경고가 없어요" in missing.reply and "도배" in missing.reply
+    assert len(store.warning_reasons("방", "iris:t")) == 2
+
+    # 닉네임만 주면 전부 지운다.
+    every = await bot.handle("/경고삭제 말썽꾼", **owner)
+    assert "2건을 모두 지웠어요" in every.reply
+    assert store.warning_reasons("방", "iris:t") == []
+
+
+@pytest.mark.anyio
 async def test_warn_permission_grant_multiple_at_once(tmp_path) -> None:
     from app.admin_store import ChatUser
 

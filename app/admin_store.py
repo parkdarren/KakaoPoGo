@@ -1427,6 +1427,34 @@ class AdminStore:
             )
         return cursor.rowcount
 
+    def remove_one_warning(self, room: str, user_key: str, reason: str) -> bool:
+        """사유가 같은 경고 하나만 지운다(같은 사유가 여럿이면 최근 것)."""
+        reason = (reason or "").strip()
+        if not reason:
+            return False
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM warnings
+                WHERE room = ? AND user_key = ? AND reason = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (room, user_key, reason),
+            ).fetchone()
+            if row is None:
+                return False
+            conn.execute("DELETE FROM warnings WHERE id = ?", (row["id"],))
+        return True
+
+    def warning_reasons(self, room: str, user_key: str) -> list[str]:
+        """그 사람에게 남아 있는 경고 사유 목록."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT reason FROM warnings WHERE room = ? AND user_key = ? ORDER BY id",
+                (room, user_key),
+            ).fetchall()
+        return [row["reason"] for row in rows]
+
     def grant_warn_permission(
         self, room: str, user_key: str, nickname: str, granted_by: str
     ) -> None:
