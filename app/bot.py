@@ -9,6 +9,7 @@ from datetime import date
 
 from app.admin_store import AdminStore, ChatUser
 from app.counters import format_counter_reply
+from app.boost import format_boost
 from app.events import EventDataUnavailableError, PokemonGoEventClient
 from app.pvp_rankings import PvpRankingClient, PvpRankingUnavailableError
 from app.pogo_api import (
@@ -292,6 +293,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "events", query
     if command in ("날씨", "전국날씨", "weather"):
         return "weather", query
+    if command in ("부스트", "날씨부스트", "boost"):
+        return "boost", query
     if command in ("오늘의포켓몬", "출첵", "출석", "ㅊㅊ"):
         return "daily", query
     if command in ("출석랭킹", "출첵랭킹"):
@@ -514,6 +517,15 @@ class PokemonGoBot:
                 return BotResponse(
                     "날씨 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
                 )
+
+        if command == "boost":
+            try:
+                weather = await self.weather_client.get_today()
+            except WeatherDataUnavailableError:
+                return BotResponse(
+                    "날씨 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+                )
+            return BotResponse(fold_long_reply(format_boost(weather, query)))
 
         if command == "owner_setup":
             return BotResponse(self._handle_owner_setup(user, query))
@@ -1675,6 +1687,9 @@ class PokemonGoBot:
             "날씨",
             "전국날씨",
             "weather",
+            "부스트",
+            "날씨부스트",
+            "boost",
             "오늘의포켓몬",
             "출첵",
             "출석",

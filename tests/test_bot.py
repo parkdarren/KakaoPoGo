@@ -390,6 +390,45 @@ async def test_existing_member_rejoin_becomes_second_entry(tmp_path) -> None:
     assert "터줏대감" in listing.reply and "2회" in listing.reply
 
 
+def test_weather_boost_formatting() -> None:
+    from datetime import datetime
+
+    from app.boost import format_boost, pogo_weather
+    from app.weather import CityWeather, NationalWeather, PeriodWeather
+
+    assert pogo_weather("강한 소나기") == "비"
+    assert pogo_weather("대체로 맑음") == "화창"
+    assert pogo_weather("눈소나기") == "눈"
+
+    def city(name, morning, afternoon):
+        return CityWeather(
+            location=name,
+            morning=PeriodWeather(name, morning, 20, 0),
+            afternoon=PeriodWeather(name, afternoon, 25, 0),
+        )
+
+    weather = NationalWeather(
+        date=datetime(2026, 8, 1),
+        cities=[city("서울", "비", "비"), city("부산", "맑음", "눈")],
+    )
+
+    summary = format_boost(weather)
+    assert "서울 · 비 → 물 전기 벌레" in summary
+    assert "부산 · 눈 → 얼음 강철" in summary  # 오후 기준
+
+    # 하루 종일 같은 날씨면 한 번만, 어태커 추천이 붙는다.
+    seoul = format_boost(weather, "서울")
+    assert seoul.count("→ 물 전기 벌레") == 1
+    assert "[종일]" in seoul
+    assert "가이오가" in seoul
+
+    # 오전·오후가 다르면 따로 보여준다.
+    busan = format_boost(weather, "부산")
+    assert "[오전]" in busan and "[오후]" in busan
+
+    assert "지역은 없어요" in format_boost(weather, "평양")
+
+
 def test_parse_warning_commands() -> None:
     assert parse_command("/경고추가 홍길동 도배") == ("warn_add", "홍길동 도배")
     assert parse_command("/경고") == ("warn_list", "")
