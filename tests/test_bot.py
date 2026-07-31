@@ -390,6 +390,18 @@ async def test_existing_member_rejoin_becomes_second_entry(tmp_path) -> None:
     assert "터줏대감" in listing.reply and "2회" in listing.reply
 
 
+@pytest.mark.anyio
+async def test_leave_baselines_untracked_member(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+
+    # 채팅 한 번 없던 잠수 유저라도 스스로 나가면(퇴장 피드) 입장 1회로 잡힌다.
+    bot.handle_member_leaves("방", [("ghost", "유령")])
+    # 그래서 다시 들어오면 곧바로 2회차.
+    warn = bot.handle_member_joins("방", [("ghost", "유령")])
+    assert "입장 2회차" in warn
+
+
 def test_parse_iris_feed_formats() -> None:
     from app.main import _parse_iris_feed
 

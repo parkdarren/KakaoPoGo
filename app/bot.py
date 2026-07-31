@@ -1201,8 +1201,10 @@ class PokemonGoBot:
     ) -> None:
         """퇴장·강퇴한 사람은 현재 인원에서 뺀다. 강퇴는 다음 복귀를 면제한다."""
         clean_room = normalize_room(room) or "local"
-        for user_id, _nickname in members:
-            self.admin_store.mark_member_left(clean_room, user_id, kicked=kicked)
+        for user_id, nickname in members:
+            self.admin_store.mark_member_left(
+                clean_room, user_id, nickname=nickname, kicked=kicked
+            )
 
     @staticmethod
     def _daily_pick(seed: str, options: list[str]) -> str:

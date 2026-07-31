@@ -1248,28 +1248,38 @@ class AdminStore:
                 (room, user_id, nickname),
             )
 
-    def mark_member_left(self, room: str, user_id: str, kicked: bool = False) -> None:
+    def mark_member_left(
+        self, room: str, user_id: str, nickname: str = "", kicked: bool = False
+    ) -> None:
         """방을 떠난 사람은 present=0 으로 둔다.
 
-        자발적 퇴장은 입장 횟수를 남겨 다시 들어오면 이어 센다. 강퇴(kicked)는
-        본인 의사가 아니므로 다음 입장 한 번을 카운트에서 면제(pardon_next)한다.
+        기록이 없던 사람(추적 시작 전부터 있던 잠수 유저)도 나가는 순간
+        방에 있었다는 게 확인되므로 입장 1회로 기준을 잡는다. 그래야 다시
+        들어오면 자동으로 2회차가 된다. 자발적 퇴장은 입장 횟수를 남겨 이어
+        세고, 강퇴(kicked)는 다음 입장 한 번을 카운트에서 면제(pardon_next)한다.
         """
         room = (room or "").strip()
         user_id = (user_id or "").strip()
         if not room or not user_id:
             return
+        nickname = (nickname or "").strip()
+        pardon = 1 if kicked else 0
         with self._connect() as conn:
-            if kicked:
-                conn.execute(
-                    "UPDATE room_join_counts SET present = 0, pardon_next = 1 "
-                    "WHERE room = ? AND user_id = ?",
-                    (room, user_id),
-                )
-            else:
-                conn.execute(
-                    "UPDATE room_join_counts SET present = 0 WHERE room = ? AND user_id = ?",
-                    (room, user_id),
-                )
+            conn.execute(
+                """
+                INSERT INTO room_join_counts
+                    (room, user_id, nickname, join_count, present, pardon_next, last_join_at)
+                VALUES (?, ?, ?, 1, 0, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(room, user_id) DO UPDATE SET
+                    present = 0,
+                    pardon_next = CASE WHEN ? = 1 THEN 1 ELSE pardon_next END,
+                    nickname = CASE
+                        WHEN excluded.nickname != '' THEN excluded.nickname
+                        ELSE room_join_counts.nickname
+                    END
+                """,
+                (room, user_id, nickname, pardon, pardon),
+            )
 
     def join_ranking(self, room: str, min_count: int = 2) -> list[tuple[str, int]]:
         """현재 방에 있는 재입장(들낙) 인원 전원을 횟수 많은 순으로."""
