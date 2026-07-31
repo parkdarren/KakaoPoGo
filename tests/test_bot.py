@@ -345,6 +345,29 @@ async def test_member_join_counting_is_per_room(tmp_path) -> None:
     assert "들낙이" in rejoined.reply and "3회" in rejoined.reply
 
 
+@pytest.mark.anyio
+async def test_kicked_member_rejoin_is_not_counted(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+
+    # 정상 입장 1회.
+    assert bot.handle_member_joins("방", [("k1", "내풀이")]) == ""
+
+    # 관리자가 내보내기(강퇴) 후 차단을 풀어 다시 들어온 경우는 카운트 제외.
+    bot.handle_member_leaves("방", [("k1", "내풀이")], kicked=True)
+    after = bot.handle_member_joins("방", [("k1", "내풀이")])
+    assert after == ""  # 의심 문구 없음
+
+    # 그래서 들낙 명단에도 안 뜬다(여전히 입장 1회로 취급).
+    listing = await bot.handle("/들낙", room="방", sender="관리자", user_key="iris:y")
+    assert "내풀이" not in listing.reply
+
+    # 이후 스스로 나갔다가 다시 들어오면 그때는 카운트된다.
+    bot.handle_member_leaves("방", [("k1", "내풀이")], kicked=False)
+    warn = bot.handle_member_joins("방", [("k1", "내풀이")])
+    assert "입장 2회차" in warn
+
+
 def test_parse_iris_feed_formats() -> None:
     from app.main import _parse_iris_feed
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from typing import Any
 
@@ -47,6 +48,7 @@ class AsciiJSONResponse(Response):
 app = FastAPI(title="KakaoPoGo Bot", version="0.1.0")
 bot = PokemonGoBot()
 pogo = PogoApiClient()
+_iris_logger = logging.getLogger("iris")
 
 KAKAO_CHANNEL_ALLOWED_COMMANDS = {
     "help",
@@ -403,7 +405,16 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
                     return {"reply": warning, "silent": False, "chat_id": chat_id}
             elif feed_type in (2, 6) and members:
                 # 나가거나 강퇴당한 사람은 들낙 명단에서 빠진다.
-                bot.handle_member_leaves(group_room, members)
+                # 강퇴(feedType 6)는 본인 의사가 아니라 다음 복귀를 카운트 면제한다.
+                bot.handle_member_leaves(group_room, members, kicked=(feed_type == 6))
+        # (임시) 강퇴 피드의 실제 feedType 을 확인하기 위한 캡처. 확인되면 제거.
+        if feed_type != 4:
+            _iris_logger.warning(
+                "IRIS_LEAVE_CAPTURE feedType=%s members=%s raw=%s",
+                feed_type,
+                members,
+                json.dumps(request.json, ensure_ascii=False)[:900],
+            )
         return {"reply": "", "silent": True, "chat_id": chat_id}
 
     # 1:1 개인톡방은 room·sender가 없다. room은 chat_id로 고유하게 잡고,

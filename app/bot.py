@@ -1186,18 +1186,23 @@ class PokemonGoBot:
         clean_room = normalize_room(room) or "local"
         suspects = []
         for user_id, nickname in members:
-            count = self.admin_store.record_member_join(clean_room, user_id, nickname)
-            if count >= 2:
+            count, counted = self.admin_store.record_member_join(
+                clean_room, user_id, nickname
+            )
+            # 강퇴 후 복귀는 counted=False 라 의심 문구를 내지 않는다.
+            if counted and count >= 2:
                 suspects.append(f"{nickname or '누군가'} 님 · 입장 {count}회차")
         if not suspects:
             return ""
         return "👀 들낙 유저 의심\n" + "\n".join(suspects)
 
-    def handle_member_leaves(self, room: str, members: list[tuple[str, str]]) -> None:
-        """퇴장·강퇴한 사람은 현재 인원에서 빼서 들낙 명단에 안 나오게 한다."""
+    def handle_member_leaves(
+        self, room: str, members: list[tuple[str, str]], kicked: bool = False
+    ) -> None:
+        """퇴장·강퇴한 사람은 현재 인원에서 뺀다. 강퇴는 다음 복귀를 면제한다."""
         clean_room = normalize_room(room) or "local"
         for user_id, _nickname in members:
-            self.admin_store.mark_member_left(clean_room, user_id)
+            self.admin_store.mark_member_left(clean_room, user_id, kicked=kicked)
 
     @staticmethod
     def _daily_pick(seed: str, options: list[str]) -> str:

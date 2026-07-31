@@ -183,6 +183,7 @@ class AdminStore:
                     nickname TEXT NOT NULL DEFAULT '',
                     join_count INTEGER NOT NULL DEFAULT 0,
                     present INTEGER NOT NULL DEFAULT 1,
+                    pardon_next INTEGER NOT NULL DEFAULT 0,
                     last_join_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (room, user_id)
                 );
@@ -216,6 +217,7 @@ class AdminStore:
             self._ensure_column(conn, "custom_commands", "taught_at", "TEXT")
             self._ensure_column(conn, "custom_commands", "help_order", "INTEGER")
             self._ensure_column(conn, "room_join_counts", "present", "INTEGER NOT NULL DEFAULT 1")
+            self._ensure_column(conn, "room_join_counts", "pardon_next", "INTEGER NOT NULL DEFAULT 0")
             conn.execute(
                 """
                 UPDATE custom_commands
@@ -1181,21 +1183,32 @@ class AdminStore:
             ).fetchone()
         return row["room_name"] if row else None
 
-    def record_member_join(self, room: str, user_id: str, nickname: str) -> int:
-        """입장 이벤트를 방·사용자별로 센다. 새 입장 횟수를 돌려준다.
+    def record_member_join(self, room: str, user_id: str, nickname: str) -> tuple[int, bool]:
+        """입장 이벤트를 방·사용자별로 센다. (입장횟수, 카운트했는지) 를 준다.
 
         방(chat_id로 고정된 이름)마다 따로 세므로 다른 방과 합쳐지지 않는다.
+        강퇴 후 복귀(pardon_next)는 본인 의사가 아니라 카운트하지 않는다.
         """
         room = (room or "").strip()
         user_id = (user_id or "").strip()
         if not room or not user_id:
-            return 0
+            return (0, False)
         nickname = (nickname or "").strip()
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT join_count FROM room_join_counts WHERE room = ? AND user_id = ?",
+                "SELECT join_count, pardon_next FROM room_join_counts "
+                "WHERE room = ? AND user_id = ?",
                 (room, user_id),
             ).fetchone()
+            if row and row["pardon_next"]:
+                # 강퇴 후 복귀 - 카운트 그대로 두고 방에 있음 표시만 한다.
+                conn.execute(
+                    "UPDATE room_join_counts SET present = 1, pardon_next = 0, "
+                    "nickname = ?, last_join_at = CURRENT_TIMESTAMP "
+                    "WHERE room = ? AND user_id = ?",
+                    (nickname, room, user_id),
+                )
+                return (row["join_count"], False)
             new_count = (row["join_count"] if row else 0) + 1
             conn.execute(
                 """
@@ -1210,23 +1223,30 @@ class AdminStore:
                 """,
                 (room, user_id, nickname, new_count),
             )
-        return new_count
+        return (new_count, True)
 
-    def mark_member_left(self, room: str, user_id: str) -> None:
-        """퇴장·강퇴로 방을 떠난 사람은 present=0 으로 둔다.
+    def mark_member_left(self, room: str, user_id: str, kicked: bool = False) -> None:
+        """방을 떠난 사람은 present=0 으로 둔다.
 
-        입장 횟수는 남겨서 다시 들어오면 이어 세지만, 현재 방에 없으므로
-        들낙 목록에서는 빠진다.
+        자발적 퇴장은 입장 횟수를 남겨 다시 들어오면 이어 센다. 강퇴(kicked)는
+        본인 의사가 아니므로 다음 입장 한 번을 카운트에서 면제(pardon_next)한다.
         """
         room = (room or "").strip()
         user_id = (user_id or "").strip()
         if not room or not user_id:
             return
         with self._connect() as conn:
-            conn.execute(
-                "UPDATE room_join_counts SET present = 0 WHERE room = ? AND user_id = ?",
-                (room, user_id),
-            )
+            if kicked:
+                conn.execute(
+                    "UPDATE room_join_counts SET present = 0, pardon_next = 1 "
+                    "WHERE room = ? AND user_id = ?",
+                    (room, user_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE room_join_counts SET present = 0 WHERE room = ? AND user_id = ?",
+                    (room, user_id),
+                )
 
     def join_ranking(self, room: str, min_count: int = 2) -> list[tuple[str, int]]:
         """현재 방에 있는 재입장(들낙) 인원 전원을 횟수 많은 순으로."""
