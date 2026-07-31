@@ -307,21 +307,62 @@ def test_site_link_shown_only_in_owner_dm(tmp_path) -> None:
     assert "오너" in denied.reply
 
 
+def test_parse_league_ranking_commands() -> None:
+    assert parse_command("/슈리") == ("pvp_great", "")
+    assert parse_command("/하리") == ("pvp_ultra", "")
+    assert parse_command("/마리") == ("pvp_master", "")
+
+
+class _StubPvp:
+    def __init__(self, text=None, fail=False) -> None:
+        self.text = text
+        self.fail = fail
+
+    async def format_league(self, league_key):
+        from app.pvp_rankings import PvpRankingUnavailableError
+
+        if self.fail:
+            raise PvpRankingUnavailableError("down")
+        return f"{league_key}::{self.text}"
+
+
+@pytest.mark.anyio
+async def test_league_ranking_uses_live_pvp_data(tmp_path) -> None:
+    bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        pvp_client=_StubPvp(text="랭킹본문"),
+    )
+    reply = await bot.handle("/마리", room="방", sender="유저", user_key="iris:1")
+    assert "master::랭킹본문" in reply.reply
+
+
+@pytest.mark.anyio
+async def test_league_ranking_falls_back_to_base_when_offline(tmp_path) -> None:
+    from app.bot import BASE_ROOM
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    store.upsert_custom_command(BASE_ROOM, "슈리", "저장된 슈퍼리그 순위", "시스템")
+    bot = PokemonGoBot(admin_store=store, pvp_client=_StubPvp(fail=True))
+
+    reply = await bot.handle("/슈리", room="방", sender="유저", user_key="iris:1")
+    assert reply.reply == "저장된 슈퍼리그 순위"
+
+
 @pytest.mark.anyio
 async def test_base_room_commands_are_shared_everywhere(tmp_path) -> None:
     from app.bot import BASE_ROOM
 
     store = AdminStore(tmp_path / "test.sqlite3")
-    store.upsert_custom_command(BASE_ROOM, "마리", "🟣 마스터리그 TOP 30", "시스템")
+    store.upsert_custom_command(BASE_ROOM, "세꿀", "공용 세꿀 안내", "시스템")
     bot = PokemonGoBot(admin_store=store)
 
     # 아무 방에서나 공용 기본 명령어가 나온다.
-    shared = await bot.handle("/마리", room="처음보는방", sender="유저", user_key="iris:1")
-    assert "마스터리그" in shared.reply
+    shared = await bot.handle("/세꿀", room="처음보는방", sender="유저", user_key="iris:1")
+    assert shared.reply == "공용 세꿀 안내"
 
     # 방이 같은 이름으로 자기 것을 등록하면 그 방에선 방 것이 우선한다.
-    store.upsert_custom_command("처음보는방", "마리", "우리 방 전용", "방장")
-    overridden = await bot.handle("/마리", room="처음보는방", sender="유저", user_key="iris:1")
+    store.upsert_custom_command("처음보는방", "세꿀", "우리 방 전용", "방장")
+    overridden = await bot.handle("/세꿀", room="처음보는방", sender="유저", user_key="iris:1")
     assert overridden.reply == "우리 방 전용"
 
     # 공용에도 없는 명령어는 조용히 무시된다.

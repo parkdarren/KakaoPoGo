@@ -10,6 +10,7 @@ from datetime import date
 from app.admin_store import AdminStore, ChatUser
 from app.counters import format_counter_reply
 from app.events import EventDataUnavailableError, PokemonGoEventClient
+from app.pvp_rankings import PvpRankingClient, PvpRankingUnavailableError
 from app.pogo_api import (
     MegaUnavailableError,
     PogoApiClient,
@@ -281,6 +282,12 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "cp", query
     if command in ("리그", "league"):
         return "league", query
+    if command in ("슈리", "슈퍼리그"):
+        return "pvp_great", query
+    if command in ("하리", "하이퍼리그"):
+        return "pvp_ultra", query
+    if command in ("마리", "마스터리그"):
+        return "pvp_master", query
     if command in ("포켓몬고이벤트", "이벤트", "일정", "events"):
         return "events", query
     if command in ("날씨", "전국날씨", "weather"):
@@ -382,9 +389,11 @@ class PokemonGoBot:
         weather_client: KoreaWeatherClient | None = None,
         admin_store: AdminStore | None = None,
         owner_setup_code: str | None = None,
+        pvp_client: PvpRankingClient | None = None,
     ) -> None:
         self.pogo_client = pogo_client or PogoApiClient()
         self.event_client = event_client or PokemonGoEventClient()
+        self.pvp_client = pvp_client or PvpRankingClient()
         self.weather_client = weather_client or KoreaWeatherClient()
         self.admin_store = admin_store or AdminStore()
         self.owner_setup_code = (
@@ -590,6 +599,24 @@ class PokemonGoBot:
             except PogoDataUnavailableError:
                 return BotResponse(DATA_UNAVAILABLE_MESSAGE)
             return BotResponse(format_counter_reply(entry))
+
+        if command in ("pvp_great", "pvp_ultra", "pvp_master"):
+            league, base_cmd = {
+                "pvp_great": ("great", "슈리"),
+                "pvp_ultra": ("ultra", "하리"),
+                "pvp_master": ("master", "마리"),
+            }[command]
+            try:
+                text = await self.pvp_client.format_league(league)
+            except PvpRankingUnavailableError:
+                # pvpoke를 못 불러오면 공용에 저장된 마지막 순위로 대체한다.
+                fallback = self.admin_store.get_custom_command(BASE_ROOM, base_cmd)
+                text = (
+                    fallback.response
+                    if fallback
+                    else "리그 순위를 불러오지 못했어요. 잠시 후 다시 시도해 주세요."
+                )
+            return BotResponse(fold_long_reply(text))
 
         if command == "league":
             if not query:
@@ -1404,6 +1431,12 @@ class PokemonGoBot:
             "cp",
             "리그",
             "league",
+            "슈리",
+            "슈퍼리그",
+            "하리",
+            "하이퍼리그",
+            "마리",
+            "마스터리그",
             "포켓몬고이벤트",
             "이벤트",
             "일정",
