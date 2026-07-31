@@ -390,6 +390,58 @@ async def test_existing_member_rejoin_becomes_second_entry(tmp_path) -> None:
     assert "터줏대감" in listing.reply and "2회" in listing.reply
 
 
+def test_parse_warning_commands() -> None:
+    assert parse_command("/경고추가 홍길동 도배") == ("warn_add", "홍길동 도배")
+    assert parse_command("/경고") == ("warn_list", "")
+    assert parse_command("/경고삭제 홍길동") == ("warn_remove", "홍길동")
+
+
+@pytest.mark.anyio
+async def test_warning_tracks_by_id_across_nickname_change(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    admin = ChatUser(room="방", sender="관리자", user_key="iris:boss")
+    store.add_owner(ChatUser(room="개인톡:o", sender="오너", user_key="iris:boss"))
+
+    # 대상이 채팅을 해서 닉네임->ID 매핑이 생긴다.
+    store.record_chat_message("방", "iris:9999", "홍길동", "2026-07-30")
+
+    added = await bot.handle("/경고추가 홍길동 도배", room="방", sender="관리자", user_key="iris:boss")
+    assert "경고 등록" in added.reply and "1회" in added.reply
+
+    # 대상이 닉네임을 바꾸고 채팅하면 최신 닉네임이 잡힌다.
+    store.record_chat_message("방", "iris:9999", "김철수", "2026-07-31")
+    listed = await bot.handle("/경고", room="방", sender="관리자", user_key="iris:boss")
+    assert "김철수" in listed.reply  # 바뀐 닉네임으로 표시
+    assert "도배" in listed.reply
+
+    # 일반 사용자는 경고를 못 넣는다.
+    denied = await bot.handle("/경고추가 홍길동 사유", room="방", sender="행인", user_key="iris:rando")
+    assert "owner 또는 admin" in denied.reply
+
+
+@pytest.mark.anyio
+async def test_warning_add_needs_known_nickname(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    store.add_owner(ChatUser(room="개인톡:o", sender="오너", user_key="iris:boss"))
+
+    # 채팅 기록이 없는 닉네임은 등록 불가(ID 매핑이 없어서).
+    unknown = await bot.handle("/경고추가 없는사람 사유", room="방", sender="관리자", user_key="iris:boss")
+    assert "찾지 못했" in unknown.reply
+
+    # 공백이 있는 닉네임도 가장 긴 것부터 맞춰 처리한다.
+    store.record_chat_message("방", "iris:7", "링딩 임시", "2026-07-31")
+    ok = await bot.handle("/경고추가 링딩 임시 도배심함", room="방", sender="관리자", user_key="iris:boss")
+    assert "경고 등록" in ok.reply
+    listing = await bot.handle("/경고", room="방", sender="관리자", user_key="iris:boss")
+    assert "링딩 임시" in listing.reply and "도배심함" in listing.reply
+
+
 @pytest.mark.anyio
 async def test_leave_baselines_untracked_member(tmp_path) -> None:
     store = AdminStore(tmp_path / "test.sqlite3")

@@ -177,6 +177,16 @@ class AdminStore:
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS warnings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room TEXT NOT NULL,
+                    user_key TEXT NOT NULL,
+                    nickname TEXT NOT NULL DEFAULT '',
+                    reason TEXT NOT NULL DEFAULT '',
+                    warned_by TEXT NOT NULL DEFAULT '',
+                    warned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS room_join_counts (
                     room TEXT NOT NULL,
                     user_id TEXT NOT NULL,
@@ -1309,6 +1319,96 @@ class AdminStore:
                 (room, nickname),
             ).fetchone()
         return (row["nickname"], row["join_count"]) if row else None
+
+    def resolve_user_key_by_nickname(self, room: str, nickname: str) -> str | None:
+        """방에서 그 닉네임을 쓴 사람의 user_key(고정 식별자)를 찾는다.
+
+        경고를 닉네임이 아니라 이 user_key 로 저장해야 나중에 닉네임을 바꿔도
+        추적된다. 채팅 기록(chat_stats)을 우선 보고, 없으면 입장 기록을 본다.
+        """
+        room = (room or "").strip()
+        nickname = (nickname or "").strip()
+        if not room or not nickname:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT user_key FROM chat_stats
+                WHERE room = ? AND display_name = ?
+                ORDER BY chat_date DESC, message_count DESC LIMIT 1
+                """,
+                (room, nickname),
+            ).fetchone()
+            if row:
+                return row["user_key"]
+            row = conn.execute(
+                """
+                SELECT user_id FROM room_join_counts
+                WHERE room = ? AND nickname = ?
+                ORDER BY last_join_at DESC LIMIT 1
+                """,
+                (room, nickname),
+            ).fetchone()
+        return f"iris:{row['user_id']}" if row else None
+
+    def latest_nickname(self, room: str, user_key: str) -> str | None:
+        """user_key 의 가장 최근 닉네임. 닉네임을 바꿨어도 최신 것을 돌려준다."""
+        room = (room or "").strip()
+        user_key = (user_key or "").strip()
+        if not room or not user_key:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT display_name FROM chat_stats
+                WHERE room = ? AND user_key = ?
+                ORDER BY chat_date DESC LIMIT 1
+                """,
+                (room, user_key),
+            ).fetchone()
+        return row["display_name"] if row else None
+
+    def add_warning(
+        self, room: str, user_key: str, nickname: str, reason: str, warned_by: str
+    ) -> int:
+        """경고를 하나 추가하고 그 사람의 누적 경고 횟수를 돌려준다."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO warnings (room, user_key, nickname, reason, warned_by)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (room, user_key, nickname, reason, warned_by),
+            )
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM warnings WHERE room = ? AND user_key = ?",
+                (room, user_key),
+            ).fetchone()
+        return row["n"]
+
+    def list_warnings(self, room: str) -> list[tuple[str, int, list[str]]]:
+        """경고 명단. 사람별로 (user_key, 누적횟수, 사유목록)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_key, reason FROM warnings
+                WHERE room = ? ORDER BY warned_at
+                """,
+                (room,),
+            ).fetchall()
+        grouped: dict[str, list[str]] = {}
+        for row in rows:
+            grouped.setdefault(row["user_key"], []).append(row["reason"])
+        return [(key, len(reasons), reasons) for key, reasons in grouped.items()]
+
+    def remove_warnings(self, room: str, user_key: str) -> int:
+        """그 사람의 경고를 전부 지운다. 지운 개수를 돌려준다."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM warnings WHERE room = ? AND user_key = ?",
+                (room, user_key),
+            )
+        return cursor.rowcount
 
     def list_rooms(self) -> list[tuple[str, str]]:
         """등록된 방과 각 전용 토큰 목록. (개인톡으로 링크 안내할 때 쓴다)"""
