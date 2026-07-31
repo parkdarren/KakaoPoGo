@@ -177,6 +177,7 @@ class AdminStore:
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
+                -- 경고와 칭찬을 같이 담는다. kind 로 구분한다('warn'/'praise').
                 CREATE TABLE IF NOT EXISTS warnings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     room TEXT NOT NULL,
@@ -184,6 +185,7 @@ class AdminStore:
                     nickname TEXT NOT NULL DEFAULT '',
                     reason TEXT NOT NULL DEFAULT '',
                     warned_by TEXT NOT NULL DEFAULT '',
+                    kind TEXT NOT NULL DEFAULT 'warn',
                     warned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -243,6 +245,8 @@ class AdminStore:
             self._ensure_column(conn, "custom_commands", "help_order", "INTEGER")
             self._ensure_column(conn, "room_join_counts", "present", "INTEGER NOT NULL DEFAULT 1")
             self._ensure_column(conn, "room_join_counts", "pardon_next", "INTEGER NOT NULL DEFAULT 0")
+            # 칭찬 기능이 생기기 전 기록은 전부 경고다.
+            self._ensure_column(conn, "warnings", "kind", "TEXT NOT NULL DEFAULT 'warn'")
             conn.execute(
                 """
                 UPDATE custom_commands
@@ -1403,49 +1407,60 @@ class AdminStore:
         return row["display_name"] if row else None
 
     def add_warning(
-        self, room: str, user_key: str, nickname: str, reason: str, warned_by: str
+        self,
+        room: str,
+        user_key: str,
+        nickname: str,
+        reason: str,
+        warned_by: str,
+        kind: str = "warn",
     ) -> int:
-        """경고를 하나 추가하고 그 사람의 누적 경고 횟수를 돌려준다."""
+        """경고/칭찬을 하나 추가하고 그 사람의 누적 횟수를 돌려준다."""
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO warnings (room, user_key, nickname, reason, warned_by)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO warnings (room, user_key, nickname, reason, warned_by, kind)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (room, user_key, nickname, reason, warned_by),
+                (room, user_key, nickname, reason, warned_by, kind),
             )
             row = conn.execute(
-                "SELECT COUNT(*) AS n FROM warnings WHERE room = ? AND user_key = ?",
-                (room, user_key),
+                "SELECT COUNT(*) AS n FROM warnings "
+                "WHERE room = ? AND user_key = ? AND kind = ?",
+                (room, user_key, kind),
             ).fetchone()
         return row["n"]
 
-    def list_warnings(self, room: str) -> list[tuple[str, int, list[str]]]:
-        """경고 명단. 사람별로 (user_key, 누적횟수, 사유목록)."""
+    def list_warnings(
+        self, room: str, kind: str = "warn"
+    ) -> list[tuple[str, int, list[str]]]:
+        """명단. 사람별로 (user_key, 누적횟수, 사유목록)."""
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT user_key, reason FROM warnings
-                WHERE room = ? ORDER BY warned_at
+                WHERE room = ? AND kind = ? ORDER BY warned_at
                 """,
-                (room,),
+                (room, kind),
             ).fetchall()
         grouped: dict[str, list[str]] = {}
         for row in rows:
             grouped.setdefault(row["user_key"], []).append(row["reason"])
         return [(key, len(reasons), reasons) for key, reasons in grouped.items()]
 
-    def remove_warnings(self, room: str, user_key: str) -> int:
-        """그 사람의 경고를 전부 지운다. 지운 개수를 돌려준다."""
+    def remove_warnings(self, room: str, user_key: str, kind: str = "warn") -> int:
+        """그 사람의 기록을 전부 지운다. 지운 개수를 돌려준다."""
         with self._connect() as conn:
             cursor = conn.execute(
-                "DELETE FROM warnings WHERE room = ? AND user_key = ?",
-                (room, user_key),
+                "DELETE FROM warnings WHERE room = ? AND user_key = ? AND kind = ?",
+                (room, user_key, kind),
             )
         return cursor.rowcount
 
-    def remove_one_warning(self, room: str, user_key: str, reason: str) -> bool:
-        """사유가 같은 경고 하나만 지운다(같은 사유가 여럿이면 최근 것)."""
+    def remove_one_warning(
+        self, room: str, user_key: str, reason: str, kind: str = "warn"
+    ) -> bool:
+        """사유가 같은 기록 하나만 지운다(같은 사유가 여럿이면 최근 것)."""
         reason = (reason or "").strip()
         if not reason:
             return False
@@ -1453,22 +1468,25 @@ class AdminStore:
             row = conn.execute(
                 """
                 SELECT id FROM warnings
-                WHERE room = ? AND user_key = ? AND reason = ?
+                WHERE room = ? AND user_key = ? AND reason = ? AND kind = ?
                 ORDER BY id DESC LIMIT 1
                 """,
-                (room, user_key, reason),
+                (room, user_key, reason, kind),
             ).fetchone()
             if row is None:
                 return False
             conn.execute("DELETE FROM warnings WHERE id = ?", (row["id"],))
         return True
 
-    def warning_reasons(self, room: str, user_key: str) -> list[str]:
-        """그 사람에게 남아 있는 경고 사유 목록."""
+    def warning_reasons(
+        self, room: str, user_key: str, kind: str = "warn"
+    ) -> list[str]:
+        """그 사람에게 남아 있는 사유 목록."""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT reason FROM warnings WHERE room = ? AND user_key = ? ORDER BY id",
-                (room, user_key),
+                "SELECT reason FROM warnings "
+                "WHERE room = ? AND user_key = ? AND kind = ? ORDER BY id",
+                (room, user_key, kind),
             ).fetchall()
         return [row["reason"] for row in rows]
 

@@ -541,6 +541,50 @@ async def test_warning_tracks_by_id_across_nickname_change(tmp_path) -> None:
     assert "경고 권한" in denied.reply
 
 
+def test_parse_praise_commands() -> None:
+    assert parse_command("/칭찬추가 홍길동 레이드 도움") == ("praise_add", "홍길동 레이드 도움")
+    assert parse_command("/칭찬") == ("praise_list", "")
+    assert parse_command("/칭찬삭제 홍길동") == ("praise_remove", "홍길동")
+
+
+@pytest.mark.anyio
+async def test_praise_is_separate_from_warning(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    store.add_owner(ChatUser(room="개인톡:o", sender="오너", user_key="iris:owner"))
+    store.record_chat_message("방", "iris:t", "착한이", "2026-08-01")
+    owner = {"room": "방", "sender": "오너", "user_key": "iris:owner"}
+
+    added = await bot.handle("/칭찬추가 착한이 레이드 많이 열어줌", **owner)
+    assert "👏 칭찬 등록" in added.reply and "1회" in added.reply
+
+    listed = await bot.handle("/칭찬", **owner)
+    assert "착한이" in listed.reply and "레이드 많이 열어줌" in listed.reply
+
+    # 경고와 칭찬은 서로 섞이지 않는다.
+    assert "착한이" not in (await bot.handle("/경고", **owner)).reply
+    await bot.handle("/경고추가 착한이 지각", **owner)
+    warn_list = await bot.handle("/경고", **owner)
+    assert "지각" in warn_list.reply and "레이드 많이 열어줌" not in warn_list.reply
+    praise_list = await bot.handle("/칭찬", **owner)
+    assert "지각" not in praise_list.reply
+
+    # 내용을 지정하면 그 1건만, 닉네임만 주면 칭찬 전부 삭제(경고는 남는다).
+    await bot.handle("/칭찬추가 착한이 친절함", **owner)
+    one = await bot.handle("/칭찬삭제 착한이 친절함", **owner)
+    assert "1건을 지웠어요" in one.reply and "남은 칭찬 1회" in one.reply
+    every = await bot.handle("/칭찬삭제 착한이", **owner)
+    assert "1건을 모두 지웠어요" in every.reply
+    assert store.warning_reasons("방", "iris:t", kind="praise") == []
+    assert store.warning_reasons("방", "iris:t", kind="warn") == ["지각"]
+
+    # 권한 없는 사람은 못 쓴다.
+    denied = await bot.handle("/칭찬추가 착한이 내용", room="방", sender="행인", user_key="iris:x")
+    assert "칭찬 권한" in denied.reply
+
+
 @pytest.mark.anyio
 async def test_warn_permission_grant_flow(tmp_path) -> None:
     from app.admin_store import ChatUser
