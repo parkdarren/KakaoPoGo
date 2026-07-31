@@ -318,6 +318,38 @@ def _iris_user_key(payload: dict[str, Any], sender: str) -> str:
     return f"sender:{sender}" if sender else "sender:unknown"
 
 
+def _parse_iris_feed(payload: dict[str, Any]) -> tuple[int, list[tuple[str, str]]] | None:
+    # 입장/퇴장 같은 카톡 시스템 메시지는 type=0 이고 message 가 JSON 이다.
+    # 입장(feedType 4)은 members 배열, 퇴장(feedType 2)은 member 하나.
+    if str(payload.get("type")) != "0":
+        return None
+    message = payload.get("message")
+    if not message:
+        return None
+    try:
+        data = json.loads(message)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    feed_type = data.get("feedType")
+    if feed_type is None:
+        return None
+    if feed_type == 4:
+        raw_members = data.get("members") or []
+    elif feed_type == 2:
+        member = data.get("member")
+        raw_members = [member] if member else []
+    else:
+        raw_members = []
+    members = [
+        (str(m.get("userId")), (m.get("nickName") or "").strip())
+        for m in raw_members
+        if isinstance(m, dict) and m.get("userId") is not None
+    ]
+    return feed_type, members
+
+
 # Iris는 웹훅 응답을 답장에 쓰지 않고, 폰의 /reply 를 따로 호출해야 한다.
 # VPS는 집 네트워크 뒤의 폰에 직접 닿을 수 없으므로, 답장을 여기에 쌓아두고
 # 폰이 바깥으로 폴링해서(GET /iris/outbox) 가져가 자기 /reply 로 보낸다.
@@ -350,6 +382,21 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
     # 봇 자기 메시지(isMine)는 집계·처리하지 않는다. 그래야 랭킹·추첨에서
     # 봇이 빠지고, 봇 답장이 다시 처리되는 무한루프도 막는다.
     if _iris_is_own_message(request.json):
+        return {"reply": "", "silent": True, "chat_id": chat_id}
+
+    # 입장/퇴장 같은 피드(시스템) 메시지는 일반 채팅으로 세지 않는다.
+    # 입장(feedType 4)은 방별로 카운팅해서 2회차 이상이면 들낙 의심 문구를 낸다.
+    feed = _parse_iris_feed(request.json)
+    if feed is not None:
+        feed_type, members = feed
+        group_room = (request.room or "").strip()
+        if group_room:
+            bot.admin_store.touch_room(chat_id, normalize_room(group_room))
+            if feed_type == 4 and members:
+                warning = bot.handle_member_joins(group_room, members)
+                if warning:
+                    await _enqueue_iris_reply(chat_id, warning)
+                    return {"reply": warning, "silent": False, "chat_id": chat_id}
         return {"reply": "", "silent": True, "chat_id": chat_id}
 
     # 1:1 개인톡방은 room·sender가 없다. room은 chat_id로 고유하게 잡고,

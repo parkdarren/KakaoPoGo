@@ -307,6 +307,54 @@ def test_site_link_shown_only_in_owner_dm(tmp_path) -> None:
     assert "오너" in denied.reply
 
 
+@pytest.mark.anyio
+async def test_member_join_counting_is_per_room(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+
+    # 처음 입장은 조용하다.
+    first = bot.handle_member_joins("A방", [("u1", "들낙이")])
+    assert first == ""
+    # 같은 방 두 번째 입장은 의심 문구.
+    second = bot.handle_member_joins("A방", [("u1", "들낙이")])
+    assert "들낙 유저 의심" in second
+    assert "입장 2회차" in second
+
+    # 다른 방 카운트와 섞이지 않는다.
+    other = bot.handle_member_joins("B방", [("u1", "들낙이")])
+    assert other == ""
+
+    # /들낙 랭킹은 그 방 기준.
+    ranking = await bot.handle("/들낙", room="A방", sender="관리자", user_key="iris:x")
+    assert "들낙이" in ranking.reply and "2회" in ranking.reply
+    empty_b = await bot.handle("/들낙", room="B방", sender="관리자", user_key="iris:x")
+    assert "기록이 없어요" in empty_b.reply
+
+    # /들낙 닉네임은 특정 사람 조회.
+    named = await bot.handle("/들낙 들낙이", room="A방", sender="관리자", user_key="iris:x")
+    assert "들낙이" in named.reply and "2회차" in named.reply
+
+
+def test_parse_iris_feed_formats() -> None:
+    from app.main import _parse_iris_feed
+
+    join = {
+        "type": "0",
+        "message": '{"feedType":4,"members":[{"userId":123,"nickName":"링딩"}]}',
+    }
+    assert _parse_iris_feed(join) == (4, [("123", "링딩")])
+
+    leave = {
+        "type": "0",
+        "message": '{"feedType":2,"member":{"userId":456,"nickName":"jace"}}',
+    }
+    assert _parse_iris_feed(leave) == (2, [("456", "jace")])
+
+    # 일반 텍스트(type 1)나 이모티콘(type 20)은 피드가 아니다.
+    assert _parse_iris_feed({"type": "1", "message": "안녕"}) is None
+    assert _parse_iris_feed({"type": "20", "message": ""}) is None
+
+
 def test_parse_league_ranking_commands() -> None:
     assert parse_command("/슈리") == ("pvp_great", "")
     assert parse_command("/하리") == ("pvp_ultra", "")

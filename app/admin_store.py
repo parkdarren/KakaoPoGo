@@ -176,6 +176,15 @@ class AdminStore:
                     site_token TEXT NOT NULL UNIQUE,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS room_join_counts (
+                    room TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    nickname TEXT NOT NULL DEFAULT '',
+                    join_count INTEGER NOT NULL DEFAULT 0,
+                    last_join_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (room, user_id)
+                );
                 """
             )
             raid_columns = {
@@ -1082,6 +1091,7 @@ class AdminStore:
             for table, key_col in (
                 ("custom_commands", "command"),
                 ("room_admins", "user_key"),
+                ("room_join_counts", "user_id"),
             ):
                 conn.execute(
                     f"""
@@ -1168,6 +1178,67 @@ class AdminStore:
                 (token,),
             ).fetchone()
         return row["room_name"] if row else None
+
+    def record_member_join(self, room: str, user_id: str, nickname: str) -> int:
+        """입장 이벤트를 방·사용자별로 센다. 새 입장 횟수를 돌려준다.
+
+        방(chat_id로 고정된 이름)마다 따로 세므로 다른 방과 합쳐지지 않는다.
+        """
+        room = (room or "").strip()
+        user_id = (user_id or "").strip()
+        if not room or not user_id:
+            return 0
+        nickname = (nickname or "").strip()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT join_count FROM room_join_counts WHERE room = ? AND user_id = ?",
+                (room, user_id),
+            ).fetchone()
+            new_count = (row["join_count"] if row else 0) + 1
+            conn.execute(
+                """
+                INSERT INTO room_join_counts (room, user_id, nickname, join_count, last_join_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(room, user_id) DO UPDATE SET
+                    join_count = excluded.join_count,
+                    nickname = excluded.nickname,
+                    last_join_at = CURRENT_TIMESTAMP
+                """,
+                (room, user_id, nickname, new_count),
+            )
+        return new_count
+
+    def join_ranking(
+        self, room: str, min_count: int = 2, limit: int = 20
+    ) -> list[tuple[str, int]]:
+        """재입장(들낙)한 사람들을 횟수 많은 순으로. (닉네임, 입장횟수)"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT nickname, join_count FROM room_join_counts
+                WHERE room = ? AND join_count >= ?
+                ORDER BY join_count DESC, last_join_at DESC
+                LIMIT ?
+                """,
+                (room, min_count, limit),
+            ).fetchall()
+        return [(row["nickname"], row["join_count"]) for row in rows]
+
+    def join_count_for_nickname(self, room: str, nickname: str) -> tuple[str, int] | None:
+        """닉네임으로 그 사람의 입장 횟수를 찾는다(가장 최근 닉네임 기준)."""
+        nickname = (nickname or "").strip()
+        if not nickname:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT nickname, join_count FROM room_join_counts
+                WHERE room = ? AND nickname = ?
+                ORDER BY last_join_at DESC LIMIT 1
+                """,
+                (room, nickname),
+            ).fetchone()
+        return (row["nickname"], row["join_count"]) if row else None
 
     def list_rooms(self) -> list[tuple[str, str]]:
         """등록된 방과 각 전용 토큰 목록. (개인톡으로 링크 안내할 때 쓴다)"""

@@ -296,6 +296,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "daily", query
     if command in ("출석랭킹", "출첵랭킹"):
         return "attendance_ranking", query
+    if command in ("들낙", "들낙이"):
+        return "join_stats", query
     if command in ("추첨", "랜덤추첨"):
         return "raffle", query
     if command in ("일일랭킹", "오늘랭킹"):
@@ -422,6 +424,9 @@ class PokemonGoBot:
 
         if command == "attendance_ranking":
             return BotResponse(self._handle_attendance_ranking(user))
+
+        if command == "join_stats":
+            return BotResponse(self._handle_join_stats(user, query))
 
         if command == "raffle":
             return BotResponse(self._handle_raffle(user))
@@ -1159,6 +1164,35 @@ class PokemonGoBot:
             lines.append(f"{marker} {display_name} - {total_days}일 / {points}P")
         return "\n".join(lines)
 
+    def _handle_join_stats(self, user: ChatUser, query: str) -> str:
+        name = query.strip()
+        if name:
+            record = self.admin_store.join_count_for_nickname(user.room, name)
+            if record is None:
+                return f"'{name}' 님의 입장 기록이 없어요."
+            nickname, count = record
+            return f"👀 {nickname} 님 · 입장 {count}회차"
+
+        ranking = self.admin_store.join_ranking(user.room, min_count=2)
+        if not ranking:
+            return "아직 재입장(들낙) 기록이 없어요."
+        lines = ["👀 들낙 랭킹 (입장 2회 이상)", "━━━━━━━━━━━━━━"]
+        for rank, (nickname, count) in enumerate(ranking, start=1):
+            lines.append(f"{rank}. {nickname} · {count}회")
+        return "\n".join(lines)
+
+    def handle_member_joins(self, room: str, members: list[tuple[str, str]]) -> str:
+        """입장 이벤트를 방별로 세고, 2회차 이상이면 의심 문구를 만든다."""
+        clean_room = normalize_room(room) or "local"
+        suspects = []
+        for user_id, nickname in members:
+            count = self.admin_store.record_member_join(clean_room, user_id, nickname)
+            if count >= 2:
+                suspects.append(f"{nickname or '누군가'} 님 · 입장 {count}회차")
+        if not suspects:
+            return ""
+        return "👀 들낙 유저 의심\n" + "\n".join(suspects)
+
     @staticmethod
     def _daily_pick(seed: str, options: list[str]) -> str:
         digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
@@ -1450,6 +1484,8 @@ class PokemonGoBot:
             "ㅊㅊ",
             "출석랭킹",
             "출첵랭킹",
+            "들낙",
+            "들낙이",
             "추첨",
             "랜덤추첨",
             "일일랭킹",
