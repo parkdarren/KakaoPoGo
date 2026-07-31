@@ -6,6 +6,7 @@ import random
 import unicodedata
 from dataclasses import dataclass
 from datetime import date
+from typing import NamedTuple
 
 from app.admin_store import AdminStore, ChatUser
 from app.counters import format_counter_reply
@@ -102,11 +103,18 @@ INSECURE_SETUP_CODES = {"", "change-me"}
 # 명령을 쳐도 그 방과 대상방에 없으면 여기서 찾는다. 실제 카톡방 이름과
 # 겹치지 않도록 예약어 형태로 둔다.
 BASE_ROOM = "__공용__"
-# 경고와 칭찬은 저장·조회 방식이 같고 표시 문구만 다르다.
-# kind: (이름, 이모지, 내용 항목 이름, 주격 조사)
+# 경고와 칭찬은 저장·조회 방식이 같고 표시 문구와 권한만 다르다.
+class RecordKind(NamedTuple):
+    label: str
+    emoji: str
+    field: str  # 내용 항목 이름
+    particle: str  # 주격 조사
+    manager_only: bool  # 경고는 권한자만, 칭찬은 누구나
+
+
 RECORD_KINDS = {
-    "warn": ("경고", "⚠️", "사유", "가"),
-    "praise": ("칭찬", "👏", "내용", "이"),
+    "warn": RecordKind("경고", "⚠️", "사유", "가", True),
+    "praise": RecordKind("칭찬", "👏", "내용", "이", False),
 }
 BUILTIN_HELP_ENTRIES = [
     (
@@ -1278,8 +1286,9 @@ class PokemonGoBot:
         )
 
     def _handle_record_add(self, user: ChatUser, query: str, kind: str) -> str:
-        label, emoji, field, _particle = RECORD_KINDS[kind]
-        if not self._can_warn(user):
+        info = RECORD_KINDS[kind]
+        label, emoji, field = info.label, info.emoji, info.field
+        if info.manager_only and not self._can_warn(user):
             return f"{label} 권한이 있는 사람만 쓸 수 있어요. (오너에게 /경고권한부여 요청)"
         words = query.split()
         if len(words) < 2:
@@ -1311,8 +1320,9 @@ class PokemonGoBot:
         return f"{emoji} {label} 등록: {current} · 누적 {count}회\n{field}: {reason}"
 
     def _handle_record_list(self, user: ChatUser, kind: str) -> str:
-        label, emoji, _field, _particle = RECORD_KINDS[kind]
-        if not self._can_warn(user):
+        info = RECORD_KINDS[kind]
+        label, emoji = info.label, info.emoji
+        if info.manager_only and not self._can_warn(user):
             return f"{label} 권한이 있는 사람만 볼 수 있어요."
         records = self.admin_store.list_warnings(user.room, kind=kind)
         if not records:
@@ -1328,8 +1338,9 @@ class PokemonGoBot:
         return fold_long_reply("\n".join(lines))
 
     def _handle_record_remove(self, user: ChatUser, query: str, kind: str) -> str:
-        label, _emoji, field, particle = RECORD_KINDS[kind]
-        if not self._can_warn(user):
+        info = RECORD_KINDS[kind]
+        label, field, particle = info.label, info.field, info.particle
+        if info.manager_only and not self._can_warn(user):
             return f"{label} 권한이 있는 사람만 쓸 수 있어요."
         stripped = query.strip()
         if not stripped:

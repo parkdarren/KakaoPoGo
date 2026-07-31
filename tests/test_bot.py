@@ -580,9 +580,14 @@ async def test_praise_is_separate_from_warning(tmp_path) -> None:
     assert store.warning_reasons("방", "iris:t", kind="praise") == []
     assert store.warning_reasons("방", "iris:t", kind="warn") == ["지각"]
 
-    # 권한 없는 사람은 못 쓴다.
-    denied = await bot.handle("/칭찬추가 착한이 내용", room="방", sender="행인", user_key="iris:x")
-    assert "칭찬 권한" in denied.reply
+    # 칭찬은 권한 없이 누구나 쓸 수 있다(경고와 다른 점).
+    passerby = {"room": "방", "sender": "행인", "user_key": "iris:x"}
+    open_add = await bot.handle("/칭찬추가 착한이 도움 많이 줌", **passerby)
+    assert "👏 칭찬 등록" in open_add.reply
+    assert "착한이" in (await bot.handle("/칭찬", **passerby)).reply
+    # 경고는 여전히 권한자만.
+    assert "경고 권한" in (await bot.handle("/경고추가 착한이 사유", **passerby)).reply
+    assert "경고 권한" in (await bot.handle("/경고", **passerby)).reply
 
 
 @pytest.mark.anyio
