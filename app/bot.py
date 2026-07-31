@@ -1258,9 +1258,11 @@ class PokemonGoBot:
         lines = [f"⚠️ 경고 명단 ({len(warnings)}명)", "━━━━━━━━━━━━━━"]
         for rank, (user_key, count, reasons) in enumerate(warnings, start=1):
             nickname = self.admin_store.latest_nickname(user.room, user_key) or "(닉 미확인)"
-            lines.append(f"{rank}. {nickname} · {count}회")
-            for reason in reasons:
-                lines.append(f"   · {reason}")
+            reason_text = ", ".join(r for r in reasons if r)
+            line = f"{rank}. {nickname} · {count}회"
+            if reason_text:
+                line += f" · {reason_text}"
+            lines.append(line)
         return fold_long_reply("\n".join(lines))
 
     def _handle_warn_remove(self, user: ChatUser, query: str) -> str:
