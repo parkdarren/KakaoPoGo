@@ -610,12 +610,12 @@ async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
     # 목록과 구매 내역에 반영된다.
     listing = await bot.handle("/상품", **buyer)
     assert "1. 전설몬 1마리 · 500P" in listing.reply
-    assert "등록자 : 오너" in listing.reply
+    assert "상품 등록자 : 오너" in listing.reply
 
     # 등록자가 닉네임을 바꾸면 목록도 최신 닉으로 따라간다.
     store.record_chat_message("방", "iris:owner", "새오너닉", "2026-08-02")
     renamed = await bot.handle("/상품", **buyer)
-    assert "등록자 : 새오너닉" in renamed.reply
+    assert "상품 등록자 : 새오너닉" in renamed.reply
 
     # 구매 내역은 누구나 볼 수 있고 번호·등록자가 붙는다.
     history = await bot.handle("/구매내역", **buyer)

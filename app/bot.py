@@ -1394,7 +1394,7 @@ class PokemonGoBot:
                 else ""
             ) or created_name
             lines.append(f"{item_no}. {name} · {price}P")
-            lines.append(f"   등록자 : {seller or '알 수 없음'}")
+            lines.append(f"   상품 등록자 : {seller or '알 수 없음'}")
         lines.append("")
         lines.append(f"내 포인트 : {points}P")
         lines.append("구매 → /구매 상품번호")
