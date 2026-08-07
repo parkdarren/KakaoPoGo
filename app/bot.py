@@ -1347,8 +1347,15 @@ class PokemonGoBot:
         name = " ".join(words[:-1]).strip()
         if not name:
             return "상품명을 입력해 주세요."
-        item_no = self.admin_store.add_shop_item(target_room, name, price)
-        return f"🛒 상품 등록\n{item_no}번 · {name} · {price}P\n구매 → /구매 {item_no}"
+        item_no = self.admin_store.add_shop_item(
+            target_room, name, price, user.user_key, user.sender
+        )
+        return (
+            "🛒 상품 등록\n"
+            f"{item_no}번 · {name} · {price}P\n"
+            f"등록자 : {user.sender}\n"
+            f"구매 → /구매 {item_no}"
+        )
 
     def _handle_shop_remove(self, user: ChatUser, query: str, target_room: str) -> str:
         try:
@@ -1366,9 +1373,16 @@ class PokemonGoBot:
             return "등록된 상품이 없어요. (관리자: /상품등록 상품명 포인트)"
         points = self.admin_store.get_points(user.room, user.user_key)
         lines = ["🛒 포인트 상점", "━━━━━━━━━━━━━━"]
-        for item_no, name, price in items:
+        for item_no, name, price, created_by, created_name in items:
             mark = "" if points >= price else " (포인트 부족)"
+            # 등록자가 닉을 바꿨으면 최신 닉으로 보여준다.
+            seller = (
+                self.admin_store.latest_nickname(user.room, created_by)
+                if created_by
+                else ""
+            ) or created_name
             lines.append(f"{item_no}. {name} · {price}P{mark}")
+            lines.append(f"   등록자 : {seller or '알 수 없음'}")
         lines.append("")
         lines.append(f"내 포인트 : {points}P")
         lines.append("구매 → /구매 상품번호")

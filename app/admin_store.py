@@ -194,6 +194,8 @@ class AdminStore:
                     item_no INTEGER NOT NULL,
                     name TEXT NOT NULL,
                     price INTEGER NOT NULL,
+                    created_by TEXT NOT NULL DEFAULT '',
+                    created_name TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (room, item_no)
                 );
@@ -273,6 +275,9 @@ class AdminStore:
             self._ensure_column(conn, "room_join_counts", "pardon_next", "INTEGER NOT NULL DEFAULT 0")
             # 칭찬 기능이 생기기 전 기록은 전부 경고다.
             self._ensure_column(conn, "warnings", "kind", "TEXT NOT NULL DEFAULT 'warn'")
+            # 등록자를 남기기 전에 올라온 상품은 등록자를 알 수 없다.
+            self._ensure_column(conn, "shop_items", "created_by", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "shop_items", "created_name", "TEXT NOT NULL DEFAULT ''")
             conn.execute(
                 """
                 UPDATE custom_commands
@@ -459,8 +464,18 @@ class AdminStore:
             ).fetchone()
         return row["points"] if row else 0
 
-    def add_shop_item(self, room: str, name: str, price: int) -> int:
-        """상품을 등록하고 번호를 돌려준다. 번호는 방마다 1부터 이어진다."""
+    def add_shop_item(
+        self,
+        room: str,
+        name: str,
+        price: int,
+        created_by: str = "",
+        created_name: str = "",
+    ) -> int:
+        """상품을 등록하고 번호를 돌려준다. 번호는 방마다 1부터 이어진다.
+
+        등록자는 닉네임이 아니라 user_key로 남겨서 닉을 바꿔도 추적된다.
+        """
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT COALESCE(MAX(item_no), 0) AS last FROM shop_items WHERE room = ?",
@@ -468,18 +483,35 @@ class AdminStore:
             ).fetchone()
             item_no = row["last"] + 1
             conn.execute(
-                "INSERT INTO shop_items (room, item_no, name, price) VALUES (?, ?, ?, ?)",
-                (room, item_no, name, price),
+                """
+                INSERT INTO shop_items
+                    (room, item_no, name, price, created_by, created_name)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (room, item_no, name, price, created_by, created_name),
             )
         return item_no
 
-    def list_shop_items(self, room: str) -> list[tuple[int, str, int]]:
+    def list_shop_items(self, room: str) -> list[tuple[int, str, int, str, str]]:
+        """(번호, 상품명, 가격, 등록자 user_key, 등록 당시 닉네임)."""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT item_no, name, price FROM shop_items WHERE room = ? ORDER BY item_no",
+                """
+                SELECT item_no, name, price, created_by, created_name
+                FROM shop_items WHERE room = ? ORDER BY item_no
+                """,
                 (room,),
             ).fetchall()
-        return [(row["item_no"], row["name"], row["price"]) for row in rows]
+        return [
+            (
+                row["item_no"],
+                row["name"],
+                row["price"],
+                row["created_by"],
+                row["created_name"],
+            )
+            for row in rows
+        ]
 
     def get_shop_item(self, room: str, item_no: int) -> tuple[str, int] | None:
         with self._connect() as conn:
