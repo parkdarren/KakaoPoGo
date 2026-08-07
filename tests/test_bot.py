@@ -577,9 +577,10 @@ async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
     second = await bot.handle("/상품등록 레이드 초대권 100", **owner)
     assert "2번" in second.reply
 
-    # 일반 사용자는 등록 못 한다.
-    denied = await bot.handle("/상품등록 공짜 0", **buyer)
-    assert "owner 또는 admin" in denied.reply
+    # 상품 관리는 누구나 할 수 있다(관리자 설정 없이 쓰려고 열어둠).
+    by_member = await bot.handle("/상품등록 임시상품 10", **buyer)
+    assert "3번" in by_member.reply
+    assert "뺐어요" in (await bot.handle("/상품삭제 3", **buyer)).reply
 
     # 포인트가 모자라면 안내만 하고 차감하지 않는다.
     store.add_points("방", "iris:ash", "지우", 60)
@@ -596,8 +597,22 @@ async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
     # 목록과 구매 내역에 반영된다.
     listing = await bot.handle("/상품", **buyer)
     assert "1. 전설몬 1마리 · 500P" in listing.reply
-    history = await bot.handle("/구매내역", **owner)
+
+    # 구매 내역은 누구나 볼 수 있고 번호가 붙는다.
+    history = await bot.handle("/구매내역", **buyer)
     assert "지우" in history.reply and "레이드 초대권" in history.reply
+    assert "1. " in history.reply
+
+    # 전달 완료하면 그 건만 지운다.
+    cleared = await bot.handle("/구매내역삭제 1", **buyer)
+    assert "전달 완료" in cleared.reply and "레이드 초대권" in cleared.reply
+    assert "구매 내역이 없어요" in (await bot.handle("/구매내역", **buyer)).reply
+    assert "없어요" in (await bot.handle("/구매내역삭제 1", **buyer)).reply
+
+    # 전체 삭제도 된다.
+    store.record_purchase("방", "iris:ash", "지우", "간식", 10)
+    store.record_purchase("방", "iris:b", "링딩", "간식", 10)
+    assert "2건을 모두 지웠어요" in (await bot.handle("/구매내역삭제 전체", **buyer)).reply
 
     # 없는 번호는 막는다.
     assert "없어요" in (await bot.handle("/구매 99", **buyer)).reply

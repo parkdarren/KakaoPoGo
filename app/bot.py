@@ -331,6 +331,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "shop_buy", query
     if command in ("구매내역",):
         return "shop_history", query
+    if command in ("구매내역삭제", "구매내역제거"):
+        return "shop_history_clear", query
     if command in ("들낙", "들낙이"):
         return "join_stats", query
     if command in ("경고추가",):
@@ -498,6 +500,9 @@ class PokemonGoBot:
 
         if command == "shop_history":
             return BotResponse(self._handle_shop_history(user))
+
+        if command == "shop_history_clear":
+            return BotResponse(self._handle_shop_history_clear(user, query))
 
         if command in ("warn_add", "praise_add"):
             kind = "warn" if command == "warn_add" else "praise"
@@ -1330,8 +1335,6 @@ class PokemonGoBot:
         )
 
     def _handle_shop_add(self, user: ChatUser, query: str, target_room: str) -> str:
-        if not self._can_manage_room(user, target_room):
-            return "owner 또는 admin만 상품을 등록할 수 있습니다."
         words = query.split()
         if len(words) < 2:
             return "형식은 이렇게예요.\n/상품등록 상품명 포인트\n예: /상품등록 전설몬 1마리 500"
@@ -1348,8 +1351,6 @@ class PokemonGoBot:
         return f"🛒 상품 등록\n{item_no}번 · {name} · {price}P\n구매 → /구매 {item_no}"
 
     def _handle_shop_remove(self, user: ChatUser, query: str, target_room: str) -> str:
-        if not self._can_manage_room(user, target_room):
-            return "owner 또는 admin만 상품을 삭제할 수 있습니다."
         try:
             item_no = int(query.strip())
         except ValueError:
@@ -1404,16 +1405,40 @@ class PokemonGoBot:
         )
 
     def _handle_shop_history(self, user: ChatUser) -> str:
-        if not self.admin_store.is_admin_or_owner(user):
-            return "owner 또는 admin만 구매 내역을 볼 수 있습니다."
         purchases = self.admin_store.list_purchases(user.room)
         if not purchases:
             return "아직 구매 내역이 없어요."
-        lines = ["🧾 최근 구매 내역", "━━━━━━━━━━━━━━"]
-        for nickname, item_name, price, bought_at in purchases:
-            day = (bought_at or "")[:10]
-            lines.append(f"・{day} {nickname} · {item_name} ({price}P)")
+        lines = ["🧾 구매 내역 (전달 대기)", "━━━━━━━━━━━━━━"]
+        for purchase_id, nickname, item_name, price, bought_at in purchases:
+            day = (bought_at or "")[5:10]
+            lines.append(f"{purchase_id}. {day} {nickname} · {item_name} ({price}P)")
+        lines.append("")
+        lines.append("전달 완료 → /구매내역삭제 번호")
         return fold_long_reply("\n".join(lines))
+
+    def _handle_shop_history_clear(self, user: ChatUser, query: str) -> str:
+        target = query.strip()
+        if not target:
+            return (
+                "형식은 이렇게예요.\n"
+                "/구매내역삭제 번호 → 그 건만 삭제\n"
+                "/구매내역삭제 전체 → 내역 전부 삭제\n"
+                "번호 확인 → /구매내역"
+            )
+        if target in ("전체", "all"):
+            removed = self.admin_store.clear_purchases(user.room)
+            if not removed:
+                return "지울 구매 내역이 없어요."
+            return f"🧾 구매 내역 {removed}건을 모두 지웠어요."
+        try:
+            purchase_id = int(target)
+        except ValueError:
+            return "번호를 숫자로 입력해 주세요.\n번호 확인 → /구매내역"
+        removed_item = self.admin_store.remove_purchase(user.room, purchase_id)
+        if removed_item is None:
+            return f"{purchase_id}번 구매 내역이 없어요. /구매내역 으로 확인해 주세요."
+        nickname, item_name = removed_item
+        return f"✅ 전달 완료 처리\n{nickname} 님의 '{item_name}' 내역을 지웠어요."
 
     def award_daily_rank_points(self, room: str, today: str) -> str:
         """일일랭킹 상위에게 포인트를 주고 안내 문구를 만든다.
@@ -1933,6 +1958,8 @@ class PokemonGoBot:
             "상품목록",
             "구매",
             "구매내역",
+            "구매내역삭제",
+            "구매내역제거",
             "들낙",
             "들낙이",
             "경고추가",

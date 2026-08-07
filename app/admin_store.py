@@ -515,19 +515,47 @@ class AdminStore:
                 (room, user_key, nickname, item_name, price),
             )
 
-    def list_purchases(self, room: str, limit: int = 20) -> list[tuple[str, str, int, str]]:
+    def list_purchases(
+        self, room: str, limit: int = 20
+    ) -> list[tuple[int, str, str, int, str]]:
+        """최근 구매 내역 (번호, 닉네임, 상품명, 가격, 구매시각)."""
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT nickname, item_name, price, bought_at FROM shop_purchases
+                SELECT id, nickname, item_name, price, bought_at FROM shop_purchases
                 WHERE room = ? ORDER BY id DESC LIMIT ?
                 """,
                 (room, limit),
             ).fetchall()
         return [
-            (row["nickname"], row["item_name"], row["price"], row["bought_at"])
+            (
+                row["id"],
+                row["nickname"],
+                row["item_name"],
+                row["price"],
+                row["bought_at"],
+            )
             for row in rows
         ]
+
+    def remove_purchase(self, room: str, purchase_id: int) -> tuple[str, str] | None:
+        """구매 내역 하나를 지우고 (닉네임, 상품명)을 돌려준다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT nickname, item_name FROM shop_purchases WHERE room = ? AND id = ?",
+                (room, purchase_id),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute("DELETE FROM shop_purchases WHERE id = ?", (purchase_id,))
+        return (row["nickname"], row["item_name"])
+
+    def clear_purchases(self, room: str) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM shop_purchases WHERE room = ?", (room,)
+            )
+        return cursor.rowcount
 
     def daily_ranking_with_keys(
         self, room: str, chat_date: str, limit: int = 10
