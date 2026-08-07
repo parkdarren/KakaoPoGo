@@ -1474,7 +1474,7 @@ class PokemonGoBot:
                 else ""
             ) or seller_name
             if seller:
-                lines.append(f"   등록자 : {seller}")
+                lines.append(f"   상품 등록자 : {seller}")
         lines.append("")
         lines.append("전달 완료 → /구매내역삭제 번호")
         return fold_long_reply("\n".join(lines))
