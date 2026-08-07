@@ -1382,14 +1382,13 @@ class PokemonGoBot:
         points = self.admin_store.get_points(user.room, user.user_key)
         lines = ["🛒 포인트 상점", "━━━━━━━━━━━━━━"]
         for item_no, name, price, created_by, created_name in items:
-            mark = "" if points >= price else " (포인트 부족)"
             # 등록자가 닉을 바꿨으면 최신 닉으로 보여준다.
             seller = (
                 self.admin_store.latest_nickname(user.room, created_by)
                 if created_by
                 else ""
             ) or created_name
-            lines.append(f"{item_no}. {name} · {price}P{mark}")
+            lines.append(f"{item_no}. {name} · {price}P")
             lines.append(f"   등록자 : {seller or '알 수 없음'}")
         lines.append("")
         lines.append(f"내 포인트 : {points}P")
