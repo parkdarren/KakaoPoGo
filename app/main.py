@@ -269,8 +269,8 @@ def _extract_kakao_room(request: KakaoSkillRequest) -> str:
     response_class=AsciiJSONResponse,
 )
 async def command(request: CommandRequest) -> dict[str, Any]:
-    # 채팅 랭킹 집계: 명령어든 일반 채팅이든 도착한 메시지는 전부 센다.
-    bot.record_chat(request.room, request.sender, request.user_key)
+    # 채팅 랭킹 집계. 명령어는 record_chat 안에서 걸러진다.
+    bot.record_chat(request.room, request.sender, request.user_key, request.text)
     if _is_silent_message(request.text):
         return _silent_response()
 
@@ -296,8 +296,8 @@ async def command_get(
     sender: str = "local",
     user_key: str | None = None,
 ) -> dict[str, Any]:
-    # 채팅 랭킹 집계: 명령어든 일반 채팅이든 도착한 메시지는 전부 센다.
-    bot.record_chat(room, sender, user_key)
+    # 채팅 랭킹 집계. 명령어는 record_chat 안에서 걸러진다.
+    bot.record_chat(room, sender, user_key, text)
     if _is_silent_message(text):
         return _silent_response()
 
@@ -506,8 +506,8 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
     sender = (request.sender or "").strip() or "개인톡사용자"
     user_key = _iris_user_key(request.json, sender)
 
-    # 채팅 랭킹 집계: 명령어든 일반 채팅이든 도착한 메시지는 전부 센다.
-    bot.record_chat(room, sender, user_key)
+    # 채팅 랭킹 집계. 명령어는 record_chat 안에서 걸러진다.
+    bot.record_chat(room, sender, user_key, text)
     # 이미 방에 있는 사람은 첫 활동 때 '입장 1회'로 기준을 잡아둔다. 그래야
     # 추적 시작 전부터 있던 사람도 나갔다 들어오면 자동으로 2회차가 된다.
     member_id = str(request.json.get("user_id") or "").strip()

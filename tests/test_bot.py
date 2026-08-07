@@ -543,6 +543,8 @@ async def test_warning_tracks_by_id_across_nickname_change(tmp_path) -> None:
 
 @pytest.mark.anyio
 async def test_chat_earns_points_shared_with_attendance(tmp_path) -> None:
+    from datetime import date
+
     from app.admin_store import ChatUser
 
     store = AdminStore(tmp_path / "test.sqlite3")
@@ -550,8 +552,15 @@ async def test_chat_earns_points_shared_with_attendance(tmp_path) -> None:
 
     # 채팅 1회당 1포인트.
     for _ in range(3):
-        bot.record_chat("방", "지우", "iris:ash")
+        bot.record_chat("방", "지우", "iris:ash", "안녕하세요")
     assert store.get_points("방", "iris:ash") == 3
+
+    # 명령어는 포인트도 랭킹도 올리지 않는다(등록 안 된 명령어 포함).
+    bot.record_chat("방", "지우", "iris:ash", "/포인트")
+    bot.record_chat("방", "지우", "iris:ash", "/상품")
+    bot.record_chat("방", "지우", "iris:ash", "/아무거나없는명령")
+    assert store.get_points("방", "iris:ash") == 3
+    assert store.chat_ranking("방", today=date.today().isoformat()) == [("지우", 3)]
 
     # 출석 포인트와 같은 지갑에 쌓인다.
     store.check_in(ChatUser(room="방", sender="지우", user_key="iris:ash"), "2026-08-01", 5)
@@ -1406,26 +1415,27 @@ def test_chat_ranking_daily_and_total(tmp_path, monkeypatch) -> None:
     for _ in range(3):
         assert send("안녕하세요~", "수다왕", "hash:talker").json()["silent"] is True
     send("점심 뭐 먹지", "조용한사람", "hash:quiet")
-    # 명령어도 채팅 1건으로 센다.
+    # 봇에게 거는 명령어는 대화가 아니라 집계에서 빠진다.
     send("/도움말", "수다왕", "hash:talker")
+    send("/등록안된명령", "수다왕", "hash:talker")
 
     daily = send("/일일랭킹", "수다왕", "hash:talker").json()["reply"]
     lines = daily.split("\\n") if "\\n" in daily else daily.split("\n")
     assert lines[0] == "💬 오늘의 채팅 랭킹 TOP 10"
-    assert "🥇 수다왕 - 5회" in daily  # 채팅 3 + /도움말 + /일일랭킹 자신
+    assert "🥇 수다왕 - 3회" in daily  # 명령어 3건은 빠지고 실제 채팅만
     assert "🥈 조용한사람 - 1회" in daily
 
     total = send("/랭킹", "조용한사람", "hash:quiet").json()["reply"]
     assert total.startswith("💬 누적 채팅 랭킹 TOP 10")
     assert "수다왕" in total
 
-    # 새 방에서는 방금 친 명령 자신만 1회로 잡힌다.
+    # 명령어만 오간 방은 집계가 비어 있다.
     empty = client.get(
         "/command",
         headers=auth,
         params={"text": "/일일랭킹", "room": "새방", "sender": "아무개", "user_key": "hash:new"},
     ).json()["reply"]
-    assert "🥇 아무개 - 1회" in empty
+    assert "아무개" not in empty
 
 
 @pytest.mark.anyio

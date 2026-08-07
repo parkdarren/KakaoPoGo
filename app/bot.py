@@ -1242,8 +1242,16 @@ class PokemonGoBot:
             + body
         )
 
-    def record_chat(self, room: str, sender: str, user_key: str | None) -> None:
-        """랭킹 집계용으로 채팅 1건을 기록한다. 명령어든 일반 채팅이든 센다."""
+    def record_chat(
+        self, room: str, sender: str, user_key: str | None, text: str = ""
+    ) -> None:
+        """랭킹 집계용으로 채팅 1건을 기록한다.
+
+        봇에게 거는 명령어(/로 시작하는 말)는 대화가 아니므로 세지 않는다.
+        랭킹도 포인트도 실제 채팅에만 붙는다.
+        """
+        if parse_command(text) is not None:
+            return
         clean = self._chat_user(room, sender, user_key)
         if clean.room == "local" or clean.sender == "unknown":
             return
