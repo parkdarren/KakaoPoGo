@@ -1408,7 +1408,7 @@ class PokemonGoBot:
         item = self.admin_store.get_shop_item(user.room, item_no)
         if item is None:
             return f"{item_no}번 상품이 없어요. /상품 으로 확인해 주세요."
-        name, price = item
+        name, price, seller_key, seller_name = item
         points = self.admin_store.get_points(user.room, user.user_key)
         if points < price:
             return (
@@ -1425,15 +1425,28 @@ class PokemonGoBot:
             user.room, user.user_key, user.sender, -price
         )
         self.admin_store.record_purchase(
-            user.room, user.user_key, user.sender, name, price
+            user.room,
+            user.user_key,
+            user.sender,
+            name,
+            price,
+            seller_key,
+            seller_name,
         )
+        seller = (
+            self.admin_store.latest_nickname(user.room, seller_key)
+            if seller_key
+            else ""
+        ) or seller_name
         lines = [
             "🎉 구매 완료!",
             "━━━━━━━━━━━━━━",
             f"🙋 {user.sender}",
             f"🎁 {name} ({price}P)",
-            f"💰 남은 포인트 : {left}P",
         ]
+        if seller:
+            lines.append(f"📦 등록자 : {seller}")
+        lines.append(f"💰 남은 포인트 : {left}P")
         if remaining:
             lines.append("")
             lines.append(f"판매된 상품은 목록에서 빠졌어요 (남은 상품 {remaining}개)")
@@ -1444,9 +1457,24 @@ class PokemonGoBot:
         if not purchases:
             return "아직 구매 내역이 없어요."
         lines = ["🧾 구매 내역 (전달 대기)", "━━━━━━━━━━━━━━"]
-        for purchase_id, nickname, item_name, price, bought_at in purchases:
+        for (
+            purchase_id,
+            nickname,
+            item_name,
+            price,
+            bought_at,
+            seller_key,
+            seller_name,
+        ) in purchases:
             day = (bought_at or "")[5:10]
             lines.append(f"{purchase_id}. {day} {nickname} · {item_name} ({price}P)")
+            seller = (
+                self.admin_store.latest_nickname(user.room, seller_key)
+                if seller_key
+                else ""
+            ) or seller_name
+            if seller:
+                lines.append(f"   등록자 : {seller}")
         lines.append("")
         lines.append("전달 완료 → /구매내역삭제 번호")
         return fold_long_reply("\n".join(lines))

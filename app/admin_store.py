@@ -207,6 +207,8 @@ class AdminStore:
                     nickname TEXT NOT NULL DEFAULT '',
                     item_name TEXT NOT NULL,
                     price INTEGER NOT NULL,
+                    seller_key TEXT NOT NULL DEFAULT '',
+                    seller_name TEXT NOT NULL DEFAULT '',
                     bought_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -278,6 +280,9 @@ class AdminStore:
             # 등록자를 남기기 전에 올라온 상품은 등록자를 알 수 없다.
             self._ensure_column(conn, "shop_items", "created_by", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "shop_items", "created_name", "TEXT NOT NULL DEFAULT ''")
+            # 상품은 팔리면 지워지므로 등록자를 구매 시점에 함께 남긴다.
+            self._ensure_column(conn, "shop_purchases", "seller_key", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "shop_purchases", "seller_name", "TEXT NOT NULL DEFAULT ''")
             conn.execute(
                 """
                 UPDATE custom_commands
@@ -513,13 +518,21 @@ class AdminStore:
             for row in rows
         ]
 
-    def get_shop_item(self, room: str, item_no: int) -> tuple[str, int] | None:
+    def get_shop_item(
+        self, room: str, item_no: int
+    ) -> tuple[str, int, str, str] | None:
+        """(상품명, 가격, 등록자 user_key, 등록 당시 닉네임)."""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT name, price FROM shop_items WHERE room = ? AND item_no = ?",
+                """
+                SELECT name, price, created_by, created_name
+                FROM shop_items WHERE room = ? AND item_no = ?
+                """,
                 (room, item_no),
             ).fetchone()
-        return (row["name"], row["price"]) if row else None
+        if row is None:
+            return None
+        return (row["name"], row["price"], row["created_by"], row["created_name"])
 
     def remove_shop_item(self, room: str, item_no: int) -> tuple[str, int] | None:
         """상품을 지우고 (이름, 남은 개수)를 돌려준다.
@@ -550,25 +563,34 @@ class AdminStore:
         return (row["name"], len(remaining))
 
     def record_purchase(
-        self, room: str, user_key: str, nickname: str, item_name: str, price: int
+        self,
+        room: str,
+        user_key: str,
+        nickname: str,
+        item_name: str,
+        price: int,
+        seller_key: str = "",
+        seller_name: str = "",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO shop_purchases (room, user_key, nickname, item_name, price)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO shop_purchases
+                    (room, user_key, nickname, item_name, price, seller_key, seller_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (room, user_key, nickname, item_name, price),
+                (room, user_key, nickname, item_name, price, seller_key, seller_name),
             )
 
     def list_purchases(
         self, room: str, limit: int = 20
-    ) -> list[tuple[int, str, str, int, str]]:
-        """최근 구매 내역 (번호, 닉네임, 상품명, 가격, 구매시각)."""
+    ) -> list[tuple[int, str, str, int, str, str, str]]:
+        """최근 구매 (번호, 구매자, 상품명, 가격, 시각, 등록자키, 등록자닉)."""
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, nickname, item_name, price, bought_at FROM shop_purchases
+                SELECT id, nickname, item_name, price, bought_at, seller_key, seller_name
+                FROM shop_purchases
                 WHERE room = ? ORDER BY id DESC LIMIT ?
                 """,
                 (room, limit),
@@ -580,6 +602,8 @@ class AdminStore:
                 row["item_name"],
                 row["price"],
                 row["bought_at"],
+                row["seller_key"],
+                row["seller_name"],
             )
             for row in rows
         ]

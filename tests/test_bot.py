@@ -617,10 +617,12 @@ async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
     renamed = await bot.handle("/상품", **buyer)
     assert "등록자 : 새오너닉" in renamed.reply
 
-    # 구매 내역은 누구나 볼 수 있고 번호가 붙는다.
+    # 구매 내역은 누구나 볼 수 있고 번호·등록자가 붙는다.
     history = await bot.handle("/구매내역", **buyer)
     assert "지우" in history.reply and "레이드 초대권" in history.reply
     assert "1. " in history.reply
+    # 상품이 팔려 사라진 뒤에도 등록자는 남고, 닉을 바꾸면 최신 닉으로 나온다.
+    assert "등록자 : 새오너닉" in history.reply
 
     # 전달 완료하면 그 건만 지운다.
     cleared = await bot.handle("/구매내역삭제 1", **buyer)
