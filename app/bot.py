@@ -1370,10 +1370,15 @@ class PokemonGoBot:
             item_no = int(query.strip())
         except ValueError:
             return "형식은 이렇게예요.\n/상품삭제 상품번호"
-        name = self.admin_store.remove_shop_item(target_room, item_no)
-        if name is None:
+        removed = self.admin_store.remove_shop_item(target_room, item_no)
+        if removed is None:
             return f"{item_no}번 상품이 없어요. /상품 으로 확인해 주세요."
-        return f"🗑️ {item_no}번 '{name}' 상품을 뺐어요."
+        name, left = removed
+        lines = [f"🗑️ {item_no}번 '{name}' 상품을 뺐어요."]
+        if left:
+            lines.append(f"남은 {left}개 상품 번호를 1번부터 다시 매겼어요.")
+            lines.append("확인 → /상품")
+        return "\n".join(lines)
 
     def _handle_shop_list(self, user: ChatUser) -> str:
         items = self.admin_store.list_shop_items(user.room)

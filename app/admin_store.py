@@ -521,8 +521,12 @@ class AdminStore:
             ).fetchone()
         return (row["name"], row["price"]) if row else None
 
-    def remove_shop_item(self, room: str, item_no: int) -> str | None:
-        """상품을 지우고 이름을 돌려준다. 남은 상품 번호는 그대로 둔다."""
+    def remove_shop_item(self, room: str, item_no: int) -> tuple[str, int] | None:
+        """상품을 지우고 (이름, 남은 개수)를 돌려준다.
+
+        번호가 중간에 비지 않도록 남은 상품을 1번부터 다시 매긴다. 번호를
+        작은 쪽으로만 당기므로 순서대로 바꾸면 번호가 겹치지 않는다.
+        """
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT name FROM shop_items WHERE room = ? AND item_no = ?",
@@ -533,7 +537,17 @@ class AdminStore:
             conn.execute(
                 "DELETE FROM shop_items WHERE room = ? AND item_no = ?", (room, item_no)
             )
-        return row["name"]
+            remaining = conn.execute(
+                "SELECT item_no FROM shop_items WHERE room = ? ORDER BY item_no",
+                (room,),
+            ).fetchall()
+            for new_no, item in enumerate(remaining, start=1):
+                if item["item_no"] != new_no:
+                    conn.execute(
+                        "UPDATE shop_items SET item_no = ? WHERE room = ? AND item_no = ?",
+                        (new_no, room, item["item_no"]),
+                    )
+        return (row["name"], len(remaining))
 
     def record_purchase(
         self, room: str, user_key: str, nickname: str, item_name: str, price: int

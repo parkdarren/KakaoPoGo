@@ -634,6 +634,38 @@ async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
 
 
 @pytest.mark.anyio
+async def test_shop_renumbers_after_delete(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    who = {"room": "방", "sender": "링딩", "user_key": "iris:a"}
+
+    for name in ("상품하나", "상품둘", "상품셋"):
+        await bot.handle(f"/상품등록 {name} 10", **who)
+
+    # 1번을 지우면 뒤 상품이 앞으로 당겨진다.
+    removed = await bot.handle("/상품삭제 1", **who)
+    assert "다시 매겼어요" in removed.reply
+    assert [(no, name) for no, name, *_ in store.list_shop_items("방")] == [
+        (1, "상품둘"),
+        (2, "상품셋"),
+    ]
+
+    # 다음 등록은 3번으로 이어진다(4번으로 건너뛰지 않는다).
+    added = await bot.handle("/상품등록 상품넷 10", **who)
+    assert "3번" in added.reply
+
+    # 당겨진 번호로 바로 살 수 있다.
+    store.add_points("방", "iris:a", "링딩", 10)
+    bought = await bot.handle("/구매 1", **who)
+    assert "상품둘" in bought.reply
+
+    # 마지막 하나만 남기고 지워도 번호가 어긋나지 않는다.
+    await bot.handle("/상품삭제 1", **who)
+    await bot.handle("/상품삭제 1", **who)
+    assert [(no, name) for no, name, *_ in store.list_shop_items("방")] == [(1, "상품넷")]
+
+
+@pytest.mark.anyio
 async def test_daily_rank_points_awarded_once(tmp_path) -> None:
     store = AdminStore(tmp_path / "test.sqlite3")
     bot = PokemonGoBot(admin_store=store)
