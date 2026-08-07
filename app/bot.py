@@ -1457,17 +1457,19 @@ class PokemonGoBot:
         if not purchases:
             return "아직 구매 내역이 없어요."
         lines = ["🧾 구매 내역 (전달 대기)", "━━━━━━━━━━━━━━"]
-        for (
-            purchase_id,
+        # 화면 번호는 목록 순서(1번부터)다. 저장 번호와 달라도 삭제할 때
+        # 같은 순서로 다시 찾으므로 어긋나지 않는다.
+        for position, (
+            _purchase_id,
             nickname,
             item_name,
             price,
             bought_at,
             seller_key,
             seller_name,
-        ) in purchases:
+        ) in enumerate(purchases, start=1):
             day = (bought_at or "")[5:10]
-            lines.append(f"{purchase_id}. {day} {nickname} · {item_name} ({price}P)")
+            lines.append(f"{position}. {day} {nickname} · {item_name} ({price}P)")
             seller = (
                 self.admin_store.latest_nickname(user.room, seller_key)
                 if seller_key
@@ -1494,14 +1496,24 @@ class PokemonGoBot:
                 return "지울 구매 내역이 없어요."
             return f"🧾 구매 내역 {removed}건을 모두 지웠어요."
         try:
-            purchase_id = int(target)
+            position = int(target)
         except ValueError:
             return "번호를 숫자로 입력해 주세요.\n번호 확인 → /구매내역"
-        removed_item = self.admin_store.remove_purchase(user.room, purchase_id)
+        # /구매내역과 같은 순서로 다시 읽어 화면 번호를 실제 기록으로 옮긴다.
+        purchases = self.admin_store.list_purchases(user.room)
+        if not 1 <= position <= len(purchases):
+            return f"{position}번 구매 내역이 없어요. /구매내역 으로 확인해 주세요."
+        removed_item = self.admin_store.remove_purchase(
+            user.room, purchases[position - 1][0]
+        )
         if removed_item is None:
-            return f"{purchase_id}번 구매 내역이 없어요. /구매내역 으로 확인해 주세요."
+            return f"{position}번 구매 내역이 없어요. /구매내역 으로 확인해 주세요."
         nickname, item_name = removed_item
-        return f"✅ 전달 완료 처리\n{nickname} 님의 '{item_name}' 내역을 지웠어요."
+        left = len(self.admin_store.list_purchases(user.room))
+        lines = [f"✅ 전달 완료 처리", f"{nickname} 님의 '{item_name}' 내역을 지웠어요."]
+        if left:
+            lines.append(f"남은 {left}건 번호를 1번부터 다시 매겼어요.")
+        return "\n".join(lines)
 
     def award_daily_rank_points(self, room: str, today: str) -> str:
         """일일랭킹 상위에게 포인트를 주고 안내 문구를 만든다.

@@ -585,13 +585,16 @@ class AdminStore:
     def list_purchases(
         self, room: str, limit: int = 20
     ) -> list[tuple[int, str, str, int, str, str, str]]:
-        """최근 구매 (번호, 구매자, 상품명, 가격, 시각, 등록자키, 등록자닉)."""
+        """구매 목록 (내부번호, 구매자, 상품명, 가격, 시각, 등록자키, 등록자닉).
+
+        먼저 산 것이 위로 오게 오래된 순으로 준다(전달 대기 순서).
+        """
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT id, nickname, item_name, price, bought_at, seller_key, seller_name
                 FROM shop_purchases
-                WHERE room = ? ORDER BY id DESC LIMIT ?
+                WHERE room = ? ORDER BY id LIMIT ?
                 """,
                 (room, limit),
             ).fetchall()

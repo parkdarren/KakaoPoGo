@@ -630,9 +630,21 @@ async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
     assert "구매 내역이 없어요" in (await bot.handle("/구매내역", **buyer)).reply
     assert "없어요" in (await bot.handle("/구매내역삭제 1", **buyer)).reply
 
+    # 먼저 산 것이 1번으로 위에 오고, 번호는 1부터 이어진다.
+    store.record_purchase("방", "iris:ash", "지우", "먼저산것", 10)
+    store.record_purchase("방", "iris:b", "링딩", "나중산것", 10)
+    listing = await bot.handle("/구매내역", **buyer)
+    assert listing.reply.index("1. ") < listing.reply.index("2. ")
+    assert listing.reply.index("먼저산것") < listing.reply.index("나중산것")
+
+    # 화면 번호로 지우면 그 줄이 지워지고 남은 건 번호가 당겨진다.
+    picked = await bot.handle("/구매내역삭제 1", **buyer)
+    assert "먼저산것" in picked.reply
+    after = await bot.handle("/구매내역", **buyer)
+    assert "1. " in after.reply and "나중산것" in after.reply
+
     # 전체 삭제도 된다.
     store.record_purchase("방", "iris:ash", "지우", "간식", 10)
-    store.record_purchase("방", "iris:b", "링딩", "간식", 10)
     assert "2건을 모두 지웠어요" in (await bot.handle("/구매내역삭제 전체", **buyer)).reply
 
     # 없는 번호는 막는다.
