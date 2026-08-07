@@ -603,6 +603,10 @@ async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
     assert "구매 완료" in bought.reply and "레이드 초대권" in bought.reply
     assert store.get_points("방", "iris:ash") == 0
 
+    # 팔린 상품은 목록에서 사라져 다시 살 수 없다.
+    assert "레이드 초대권" not in (await bot.handle("/상품", **buyer)).reply
+    assert "없어요" in (await bot.handle("/구매 2", **buyer)).reply
+
     # 목록과 구매 내역에 반영된다.
     listing = await bot.handle("/상품", **buyer)
     assert "1. 전설몬 1마리 · 500P" in listing.reply
@@ -654,13 +658,16 @@ async def test_shop_renumbers_after_delete(tmp_path) -> None:
     added = await bot.handle("/상품등록 상품넷 10", **who)
     assert "3번" in added.reply
 
-    # 당겨진 번호로 바로 살 수 있다.
+    # 당겨진 번호로 바로 살 수 있고, 팔린 상품은 목록에서 빠진다.
     store.add_points("방", "iris:a", "링딩", 10)
     bought = await bot.handle("/구매 1", **who)
     assert "상품둘" in bought.reply
+    assert [(no, name) for no, name, *_ in store.list_shop_items("방")] == [
+        (1, "상품셋"),
+        (2, "상품넷"),
+    ]
 
     # 마지막 하나만 남기고 지워도 번호가 어긋나지 않는다.
-    await bot.handle("/상품삭제 1", **who)
     await bot.handle("/상품삭제 1", **who)
     assert [(no, name) for no, name, *_ in store.list_shop_items("방")] == [(1, "상품넷")]
 

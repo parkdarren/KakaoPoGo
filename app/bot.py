@@ -1416,19 +1416,28 @@ class PokemonGoBot:
                 f"'{name}' 은(는) {price}P인데 지금 {points}P 있어요.\n"
                 f"{price - points}P 더 모아야 해요!"
             )
+        # 상품을 먼저 가져간다. 동시에 두 사람이 사면 늦은 쪽은 여기서 걸린다.
+        removed = self.admin_store.remove_shop_item(user.room, item_no)
+        if removed is None:
+            return f"'{name}' 은(는) 방금 다른 분이 가져갔어요. /상품 으로 확인해 주세요."
+        _name, remaining = removed
         left = self.admin_store.add_points(
             user.room, user.user_key, user.sender, -price
         )
         self.admin_store.record_purchase(
             user.room, user.user_key, user.sender, name, price
         )
-        return (
-            f"🎉 구매 완료!\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"🙋 {user.sender}\n"
-            f"🎁 {name} ({price}P)\n"
-            f"💰 남은 포인트 : {left}P"
-        )
+        lines = [
+            "🎉 구매 완료!",
+            "━━━━━━━━━━━━━━",
+            f"🙋 {user.sender}",
+            f"🎁 {name} ({price}P)",
+            f"💰 남은 포인트 : {left}P",
+        ]
+        if remaining:
+            lines.append("")
+            lines.append(f"판매된 상품은 목록에서 빠졌어요 (남은 상품 {remaining}개)")
+        return "\n".join(lines)
 
     def _handle_shop_history(self, user: ChatUser) -> str:
         purchases = self.admin_store.list_purchases(user.room)
