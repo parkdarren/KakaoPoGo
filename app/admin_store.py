@@ -189,6 +189,32 @@ class AdminStore:
                     warned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS shop_items (
+                    room TEXT NOT NULL,
+                    item_no INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    price INTEGER NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (room, item_no)
+                );
+
+                CREATE TABLE IF NOT EXISTS shop_purchases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room TEXT NOT NULL,
+                    user_key TEXT NOT NULL,
+                    nickname TEXT NOT NULL DEFAULT '',
+                    item_name TEXT NOT NULL,
+                    price INTEGER NOT NULL,
+                    bought_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                -- 일일랭킹 포인트를 하루에 한 번만 주기 위한 기록.
+                CREATE TABLE IF NOT EXISTS rank_rewards (
+                    room TEXT NOT NULL,
+                    reward_date TEXT NOT NULL,
+                    PRIMARY KEY (room, reward_date)
+                );
+
                 CREATE TABLE IF NOT EXISTS event_notifications (
                     room TEXT PRIMARY KEY,
                     enabled INTEGER NOT NULL DEFAULT 1,
@@ -395,6 +421,151 @@ class AdminStore:
                 (user.room, user.user_key, user.sender, today, total_days, points),
             )
             return total_days, points, True
+
+    def add_points(
+        self, room: str, user_key: str, display_name: str, amount: int
+    ) -> int:
+        """포인트를 더하거나(양수) 뺀다(음수). 남은 포인트를 돌려준다.
+
+        출석 포인트와 같은 곳(attendance.points)에 쌓아 하나로 관리한다.
+        """
+        if not room or not user_key or not amount:
+            return self.get_points(room, user_key)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO attendance (room, user_key, display_name, points)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(room, user_key) DO UPDATE SET
+                    points = points + excluded.points,
+                    display_name = CASE
+                        WHEN excluded.display_name != '' THEN excluded.display_name
+                        ELSE attendance.display_name
+                    END
+                """,
+                (room, user_key, display_name or "", amount),
+            )
+            row = conn.execute(
+                "SELECT points FROM attendance WHERE room = ? AND user_key = ?",
+                (room, user_key),
+            ).fetchone()
+        return row["points"] if row else 0
+
+    def get_points(self, room: str, user_key: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT points FROM attendance WHERE room = ? AND user_key = ?",
+                (room, user_key),
+            ).fetchone()
+        return row["points"] if row else 0
+
+    def add_shop_item(self, room: str, name: str, price: int) -> int:
+        """상품을 등록하고 번호를 돌려준다. 번호는 방마다 1부터 이어진다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(item_no), 0) AS last FROM shop_items WHERE room = ?",
+                (room,),
+            ).fetchone()
+            item_no = row["last"] + 1
+            conn.execute(
+                "INSERT INTO shop_items (room, item_no, name, price) VALUES (?, ?, ?, ?)",
+                (room, item_no, name, price),
+            )
+        return item_no
+
+    def list_shop_items(self, room: str) -> list[tuple[int, str, int]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT item_no, name, price FROM shop_items WHERE room = ? ORDER BY item_no",
+                (room,),
+            ).fetchall()
+        return [(row["item_no"], row["name"], row["price"]) for row in rows]
+
+    def get_shop_item(self, room: str, item_no: int) -> tuple[str, int] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT name, price FROM shop_items WHERE room = ? AND item_no = ?",
+                (room, item_no),
+            ).fetchone()
+        return (row["name"], row["price"]) if row else None
+
+    def remove_shop_item(self, room: str, item_no: int) -> str | None:
+        """상품을 지우고 이름을 돌려준다. 남은 상품 번호는 그대로 둔다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT name FROM shop_items WHERE room = ? AND item_no = ?",
+                (room, item_no),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                "DELETE FROM shop_items WHERE room = ? AND item_no = ?", (room, item_no)
+            )
+        return row["name"]
+
+    def record_purchase(
+        self, room: str, user_key: str, nickname: str, item_name: str, price: int
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO shop_purchases (room, user_key, nickname, item_name, price)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (room, user_key, nickname, item_name, price),
+            )
+
+    def list_purchases(self, room: str, limit: int = 20) -> list[tuple[str, str, int, str]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT nickname, item_name, price, bought_at FROM shop_purchases
+                WHERE room = ? ORDER BY id DESC LIMIT ?
+                """,
+                (room, limit),
+            ).fetchall()
+        return [
+            (row["nickname"], row["item_name"], row["price"], row["bought_at"])
+            for row in rows
+        ]
+
+    def daily_ranking_with_keys(
+        self, room: str, chat_date: str, limit: int = 10
+    ) -> list[tuple[str, str, int]]:
+        """그날 채팅 순위 (user_key, 닉네임, 채팅수). 포인트 지급에 쓴다."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_key, display_name, message_count AS n
+                FROM chat_stats
+                WHERE room = ? AND chat_date = ? AND message_count > 0
+                ORDER BY n DESC, user_key
+                LIMIT ?
+                """,
+                (room, chat_date, limit),
+            ).fetchall()
+        return [(row["user_key"], row["display_name"], row["n"]) for row in rows]
+
+    def rooms_with_chat_on(self, chat_date: str) -> list[str]:
+        """그날 채팅이 있었던 방 목록(일일랭킹 포인트 지급 대상)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT room FROM chat_stats WHERE chat_date = ? AND message_count > 0",
+                (chat_date,),
+            ).fetchall()
+        return [row["room"] for row in rows]
+
+    def claim_rank_reward(self, room: str, reward_date: str) -> bool:
+        """그 방 그날의 랭킹 포인트 지급권을 잡는다. 이미 줬으면 False."""
+        with self._connect() as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO rank_rewards (room, reward_date) VALUES (?, ?)",
+                    (room, reward_date),
+                )
+            except sqlite3.IntegrityError:
+                return False
+        return True
 
     def open_raid(
         self,
@@ -1126,6 +1297,8 @@ class AdminStore:
                 ("room_admins", "user_key"),
                 ("room_join_counts", "user_id"),
                 ("warn_permissions", "user_key"),
+                ("shop_items", "item_no"),
+                ("rank_rewards", "reward_date"),
             ):
                 conn.execute(
                     f"""
@@ -1142,12 +1315,13 @@ class AdminStore:
                 )
                 moved[table] = cursor.rowcount
 
-            # 경고 기록은 사람당 여러 건이라 중복 제거 없이 통째로 옮긴다.
-            cursor = conn.execute(
-                "UPDATE warnings SET room = ? WHERE room = ?",
-                (new_room, old_room),
-            )
-            moved["warnings"] = cursor.rowcount
+            # 경고·구매 기록은 사람당 여러 건이라 중복 제거 없이 통째로 옮긴다.
+            for table in ("warnings", "shop_purchases"):
+                cursor = conn.execute(
+                    f"UPDATE {table} SET room = ? WHERE room = ?",
+                    (new_room, old_room),
+                )
+                moved[table] = cursor.rowcount
 
             # 방 단위 설정은 새 이름 쪽을 남기고 옛 이름 것을 옮긴다.
             conn.execute(

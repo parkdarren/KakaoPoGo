@@ -116,6 +116,10 @@ RECORD_KINDS = {
     "warn": RecordKind("경고", "⚠️", "사유", "가", True),
     "praise": RecordKind("칭찬", "👏", "내용", "이", False),
 }
+# 채팅 1회당 포인트와 일일랭킹 등수별 포인트(1~4위, 5위부터는 마지막 값).
+CHAT_POINT = 1
+RANK_REWARDS = [100, 80, 60, 40, 20]
+RANK_REWARD_LIMIT = 10
 BUILTIN_HELP_ENTRIES = [
     (
         "/도감 포켓몬이름",
@@ -315,6 +319,18 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "daily", query
     if command in ("출석랭킹", "출첵랭킹"):
         return "attendance_ranking", query
+    if command in ("포인트", "내포인트", "point"):
+        return "points", query
+    if command in ("상품등록", "상품추가"):
+        return "shop_add", query
+    if command in ("상품삭제",):
+        return "shop_remove", query
+    if command in ("상품", "상점", "상품목록"):
+        return "shop_list", query
+    if command in ("구매",):
+        return "shop_buy", query
+    if command in ("구매내역",):
+        return "shop_history", query
     if command in ("들낙", "들낙이"):
         return "join_stats", query
     if command in ("경고추가",):
@@ -464,6 +480,24 @@ class PokemonGoBot:
 
         if command == "join_stats":
             return BotResponse(self._handle_join_stats(user, query))
+
+        if command == "points":
+            return BotResponse(self._handle_points(user))
+
+        if command == "shop_add":
+            return BotResponse(self._handle_shop_add(user, query, target_user.room))
+
+        if command == "shop_remove":
+            return BotResponse(self._handle_shop_remove(user, query, target_user.room))
+
+        if command == "shop_list":
+            return BotResponse(self._handle_shop_list(user))
+
+        if command == "shop_buy":
+            return BotResponse(self._handle_shop_buy(user, query))
+
+        if command == "shop_history":
+            return BotResponse(self._handle_shop_history(user))
 
         if command in ("warn_add", "praise_add"):
             kind = "warn" if command == "warn_add" else "praise"
@@ -1211,6 +1245,10 @@ class PokemonGoBot:
         self.admin_store.record_chat_message(
             clean.room, clean.user_key, clean.sender, date.today().isoformat()
         )
+        # 채팅 1회당 1포인트. 출석 포인트와 같은 곳에 쌓인다.
+        self.admin_store.add_points(
+            clean.room, clean.user_key, clean.sender, CHAT_POINT
+        )
         # 닉네임 자동 갱신: 관리자목록 표시 이름도 최신으로.
         # 개인톡방 placeholder는 진짜 닉네임이 아니므로 제외한다.
         if clean.sender != "개인톡사용자":
@@ -1277,6 +1315,127 @@ class PokemonGoBot:
         lines = [f"👀 들낙 명단 (재입장자 {len(ranking)}명)", "━━━━━━━━━━━━━━"]
         for rank, (nickname, count) in enumerate(ranking, start=1):
             lines.append(f"{rank}. {nickname} · 입장 {count}회")
+        return fold_long_reply("\n".join(lines))
+
+    def _handle_points(self, user: ChatUser) -> str:
+        points = self.admin_store.get_points(user.room, user.user_key)
+        return (
+            f"💰 {user.sender} 님의 포인트\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"보유 : {points}P\n"
+            "\n"
+            "채팅 1회 +1P · 출석 +5P\n"
+            "일일랭킹 10위 안에 들면 추가 지급\n"
+            "쓸 곳 보기 → /상품"
+        )
+
+    def _handle_shop_add(self, user: ChatUser, query: str, target_room: str) -> str:
+        if not self._can_manage_room(user, target_room):
+            return "owner 또는 admin만 상품을 등록할 수 있습니다."
+        words = query.split()
+        if len(words) < 2:
+            return "형식은 이렇게예요.\n/상품등록 상품명 포인트\n예: /상품등록 전설몬 1마리 500"
+        try:
+            price = int(words[-1])
+        except ValueError:
+            return "맨 뒤에 필요한 포인트를 숫자로 적어주세요.\n예: /상품등록 전설몬 1마리 500"
+        if price < 0:
+            return "포인트는 0 이상으로 적어주세요."
+        name = " ".join(words[:-1]).strip()
+        if not name:
+            return "상품명을 입력해 주세요."
+        item_no = self.admin_store.add_shop_item(target_room, name, price)
+        return f"🛒 상품 등록\n{item_no}번 · {name} · {price}P\n구매 → /구매 {item_no}"
+
+    def _handle_shop_remove(self, user: ChatUser, query: str, target_room: str) -> str:
+        if not self._can_manage_room(user, target_room):
+            return "owner 또는 admin만 상품을 삭제할 수 있습니다."
+        try:
+            item_no = int(query.strip())
+        except ValueError:
+            return "형식은 이렇게예요.\n/상품삭제 상품번호"
+        name = self.admin_store.remove_shop_item(target_room, item_no)
+        if name is None:
+            return f"{item_no}번 상품이 없어요. /상품 으로 확인해 주세요."
+        return f"🗑️ {item_no}번 '{name}' 상품을 뺐어요."
+
+    def _handle_shop_list(self, user: ChatUser) -> str:
+        items = self.admin_store.list_shop_items(user.room)
+        if not items:
+            return "등록된 상품이 없어요. (관리자: /상품등록 상품명 포인트)"
+        points = self.admin_store.get_points(user.room, user.user_key)
+        lines = ["🛒 포인트 상점", "━━━━━━━━━━━━━━"]
+        for item_no, name, price in items:
+            mark = "" if points >= price else " (포인트 부족)"
+            lines.append(f"{item_no}. {name} · {price}P{mark}")
+        lines.append("")
+        lines.append(f"내 포인트 : {points}P")
+        lines.append("구매 → /구매 상품번호")
+        return fold_long_reply("\n".join(lines))
+
+    def _handle_shop_buy(self, user: ChatUser, query: str) -> str:
+        try:
+            item_no = int(query.strip())
+        except ValueError:
+            return "형식은 이렇게예요.\n/구매 상품번호\n상품 보기 → /상품"
+        item = self.admin_store.get_shop_item(user.room, item_no)
+        if item is None:
+            return f"{item_no}번 상품이 없어요. /상품 으로 확인해 주세요."
+        name, price = item
+        points = self.admin_store.get_points(user.room, user.user_key)
+        if points < price:
+            return (
+                f"❌ 포인트가 부족해요.\n"
+                f"'{name}' 은(는) {price}P인데 지금 {points}P 있어요.\n"
+                f"{price - points}P 더 모아야 해요!"
+            )
+        left = self.admin_store.add_points(
+            user.room, user.user_key, user.sender, -price
+        )
+        self.admin_store.record_purchase(
+            user.room, user.user_key, user.sender, name, price
+        )
+        return (
+            f"🎉 구매 완료!\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"🙋 {user.sender}\n"
+            f"🎁 {name} ({price}P)\n"
+            f"💰 남은 포인트 : {left}P"
+        )
+
+    def _handle_shop_history(self, user: ChatUser) -> str:
+        if not self.admin_store.is_admin_or_owner(user):
+            return "owner 또는 admin만 구매 내역을 볼 수 있습니다."
+        purchases = self.admin_store.list_purchases(user.room)
+        if not purchases:
+            return "아직 구매 내역이 없어요."
+        lines = ["🧾 최근 구매 내역", "━━━━━━━━━━━━━━"]
+        for nickname, item_name, price, bought_at in purchases:
+            day = (bought_at or "")[:10]
+            lines.append(f"・{day} {nickname} · {item_name} ({price}P)")
+        return fold_long_reply("\n".join(lines))
+
+    def award_daily_rank_points(self, room: str, today: str) -> str:
+        """일일랭킹 상위에게 포인트를 주고 안내 문구를 만든다.
+
+        하루에 한 번만 준다. 이미 준 날이면 빈 문자열을 돌려준다.
+        """
+        if not self.admin_store.claim_rank_reward(room, today):
+            return ""
+        ranking = self.admin_store.daily_ranking_with_keys(
+            room, today, limit=RANK_REWARD_LIMIT
+        )
+        if not ranking:
+            return ""
+        lines = [f"🏆 오늘의 채팅왕 포인트 지급", "━━━━━━━━━━━━━━"]
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        for rank, (user_key, display_name, count) in enumerate(ranking, start=1):
+            reward = RANK_REWARDS[min(rank, len(RANK_REWARDS)) - 1]
+            self.admin_store.add_points(room, user_key, display_name, reward)
+            marker = medals.get(rank, f"{rank}.")
+            lines.append(f"{marker} {display_name} · {count}회 → +{reward}P")
+        lines.append("")
+        lines.append("내 포인트 → /포인트 · 쓸 곳 → /상품")
         return fold_long_reply("\n".join(lines))
 
     def _can_warn(self, user: ChatUser) -> bool:
@@ -1763,6 +1922,17 @@ class PokemonGoBot:
             "ㅊㅊ",
             "출석랭킹",
             "출첵랭킹",
+            "포인트",
+            "내포인트",
+            "point",
+            "상품등록",
+            "상품추가",
+            "상품삭제",
+            "상품",
+            "상점",
+            "상품목록",
+            "구매",
+            "구매내역",
             "들낙",
             "들낙이",
             "경고추가",

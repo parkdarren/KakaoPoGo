@@ -54,6 +54,9 @@ _iris_logger = logging.getLogger("iris")
 # 아침 브리핑을 보낼 시각(KST)과 확인 주기.
 BRIEF_HOUR = int(os.getenv("EVENT_BRIEF_HOUR", "9"))
 BRIEF_CHECK_SECONDS = int(os.getenv("EVENT_BRIEF_CHECK_SECONDS", "600"))
+# 일일랭킹 포인트를 주는 시각(23시 몇 분부터). 확인 주기가 10분이라
+# 23:40~24:00 사이에 반드시 한 번은 걸린다.
+RANK_AWARD_MINUTE = int(os.getenv("RANK_AWARD_MINUTE", "40"))
 
 KAKAO_CHANNEL_ALLOWED_COMMANDS = {
     "help",
@@ -399,6 +402,24 @@ async def send_daily_briefs(now: datetime | None = None) -> list[str]:
     return sent
 
 
+async def award_rank_points(now: datetime | None = None) -> list[str]:
+    """자정에 일일랭킹이 초기화되기 전에 그날 상위에게 포인트를 준다."""
+    now = now or datetime.now(KST)
+    today = now.date().isoformat()
+    sent = []
+    for room in bot.admin_store.rooms_with_chat_on(today):
+        if room.startswith("개인톡:"):
+            continue
+        notice = bot.award_daily_rank_points(room, today)
+        if not notice:
+            continue
+        chat_id = bot.admin_store.get_chat_id_for_room(room)
+        if chat_id:
+            await _enqueue_iris_reply(chat_id, notice)
+        sent.append(room)
+    return sent
+
+
 async def _daily_brief_loop() -> None:
     # 폰이 폴링해 가는 구조라 서버는 정해진 시각 이후에 큐에 넣기만 하면 된다.
     while True:
@@ -406,6 +427,9 @@ async def _daily_brief_loop() -> None:
             now = datetime.now(KST)
             if now.hour >= BRIEF_HOUR:
                 await send_daily_briefs(now)
+            # 랭킹 포인트는 날짜가 바뀌기 전에 줘야 그날 순위가 남아 있다.
+            if now.hour == 23 and now.minute >= RANK_AWARD_MINUTE:
+                await award_rank_points(now)
         except Exception:  # 알림 실패가 봇 전체를 멈추게 두지 않는다.
             _iris_logger.exception("daily brief failed")
         await asyncio.sleep(BRIEF_CHECK_SECONDS)

@@ -541,6 +541,92 @@ async def test_warning_tracks_by_id_across_nickname_change(tmp_path) -> None:
     assert "경고 권한" in denied.reply
 
 
+@pytest.mark.anyio
+async def test_chat_earns_points_shared_with_attendance(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+
+    # 채팅 1회당 1포인트.
+    for _ in range(3):
+        bot.record_chat("방", "지우", "iris:ash")
+    assert store.get_points("방", "iris:ash") == 3
+
+    # 출석 포인트와 같은 지갑에 쌓인다.
+    store.check_in(ChatUser(room="방", sender="지우", user_key="iris:ash"), "2026-08-01", 5)
+    assert store.get_points("방", "iris:ash") == 8
+
+    mine = await bot.handle("/포인트", room="방", sender="지우", user_key="iris:ash")
+    assert "8P" in mine.reply
+
+
+@pytest.mark.anyio
+async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    store.add_owner(ChatUser(room="개인톡:o", sender="오너", user_key="iris:owner"))
+    owner = {"room": "방", "sender": "오너", "user_key": "iris:owner"}
+    buyer = {"room": "방", "sender": "지우", "user_key": "iris:ash"}
+
+    # 상품은 등록 순서대로 번호가 붙는다.
+    first = await bot.handle("/상품등록 전설몬 1마리 500", **owner)
+    assert "1번" in first.reply and "500P" in first.reply
+    second = await bot.handle("/상품등록 레이드 초대권 100", **owner)
+    assert "2번" in second.reply
+
+    # 일반 사용자는 등록 못 한다.
+    denied = await bot.handle("/상품등록 공짜 0", **buyer)
+    assert "owner 또는 admin" in denied.reply
+
+    # 포인트가 모자라면 안내만 하고 차감하지 않는다.
+    store.add_points("방", "iris:ash", "지우", 60)
+    poor = await bot.handle("/구매 2", **buyer)
+    assert "포인트가 부족해요" in poor.reply and "40P 더" in poor.reply
+    assert store.get_points("방", "iris:ash") == 60
+
+    # 충분하면 구매되고 포인트가 줄어든다.
+    store.add_points("방", "iris:ash", "지우", 40)
+    bought = await bot.handle("/구매 2", **buyer)
+    assert "구매 완료" in bought.reply and "레이드 초대권" in bought.reply
+    assert store.get_points("방", "iris:ash") == 0
+
+    # 목록과 구매 내역에 반영된다.
+    listing = await bot.handle("/상품", **buyer)
+    assert "1. 전설몬 1마리 · 500P" in listing.reply
+    history = await bot.handle("/구매내역", **owner)
+    assert "지우" in history.reply and "레이드 초대권" in history.reply
+
+    # 없는 번호는 막는다.
+    assert "없어요" in (await bot.handle("/구매 99", **buyer)).reply
+
+
+@pytest.mark.anyio
+async def test_daily_rank_points_awarded_once(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    today = "2026-08-01"
+    # 1~6위를 만든다(6위는 5위와 같은 20P를 받아야 한다).
+    for index, (key, name) in enumerate(
+        [("a", "일등"), ("b", "이등"), ("c", "삼등"), ("d", "사등"), ("e", "오등"), ("f", "육등")]
+    ):
+        for _ in range(10 - index):
+            store.record_chat_message("방", f"iris:{key}", name, today)
+
+    notice = bot.award_daily_rank_points("방", today)
+    assert "일등 · 10회 → +100P" in notice
+    assert "+80P" in notice and "+60P" in notice and "+40P" in notice
+    assert store.get_points("방", "iris:a") == 100
+    assert store.get_points("방", "iris:e") == 20
+    assert store.get_points("방", "iris:f") == 20  # 5위부터는 동일
+
+    # 같은 날 다시 돌려도 중복 지급하지 않는다.
+    assert bot.award_daily_rank_points("방", today) == ""
+    assert store.get_points("방", "iris:a") == 100
+
+
 def test_parse_praise_commands() -> None:
     assert parse_command("/칭찬추가 홍길동 레이드 도움") == ("praise_add", "홍길동 레이드 도움")
     assert parse_command("/칭찬") == ("praise_list", "")
