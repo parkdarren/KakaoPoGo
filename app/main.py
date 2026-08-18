@@ -4,14 +4,16 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from app.admin_page import ADMIN_PAGE
+from app.admin_store import ChatUser
 from app.site_page import SITE_PAGE
 from app.bot import PokemonGoBot, normalize_room, parse_command
 from app.events import KST, EventDataUnavailableError, format_daily_brief
@@ -50,10 +52,14 @@ class AsciiJSONResponse(Response):
 app = FastAPI(title="KakaoPoGo Bot", version="0.1.0")
 bot = PokemonGoBot()
 pogo = PogoApiClient()
+CONTROL_MARK_PATH = Path(__file__).resolve().parent.parent / "assets" / "kakaopogo-control-mark.webp"
 _iris_logger = logging.getLogger("iris")
 # 아침 브리핑을 보낼 시각(KST)과 확인 주기.
 BRIEF_HOUR = int(os.getenv("EVENT_BRIEF_HOUR", "9"))
 BRIEF_CHECK_SECONDS = int(os.getenv("EVENT_BRIEF_CHECK_SECONDS", "600"))
+MODERATION_TRAIN_CHECK_SECONDS = int(
+    os.getenv("MODERATION_TRAIN_CHECK_SECONDS", "600")
+)
 # 일일랭킹 포인트를 주는 시각(23시 몇 분부터). 확인 주기가 10분이라
 # 23:40~24:00 사이에 반드시 한 번은 걸린다.
 RANK_AWARD_MINUTE = int(os.getenv("RANK_AWARD_MINUTE", "40"))
@@ -270,9 +276,11 @@ def _extract_kakao_room(request: KakaoSkillRequest) -> str:
 )
 async def command(request: CommandRequest) -> dict[str, Any]:
     # 채팅 랭킹 집계. 명령어는 record_chat 안에서 걸러진다.
-    bot.record_chat(request.room, request.sender, request.user_key, request.text)
+    moderation_warning = bot.record_chat(
+        request.room, request.sender, request.user_key, request.text
+    )
     if _is_silent_message(request.text):
-        return _silent_response()
+        return _reply_response(moderation_warning) if moderation_warning else _silent_response()
 
     response = await bot.handle(
         request.text,
@@ -297,9 +305,9 @@ async def command_get(
     user_key: str | None = None,
 ) -> dict[str, Any]:
     # 채팅 랭킹 집계. 명령어는 record_chat 안에서 걸러진다.
-    bot.record_chat(room, sender, user_key, text)
+    moderation_warning = bot.record_chat(room, sender, user_key, text)
     if _is_silent_message(text):
-        return _silent_response()
+        return _reply_response(moderation_warning) if moderation_warning else _silent_response()
 
     response = await bot.handle(text, room=room, sender=sender, user_key=user_key)
     if response.silent:
@@ -326,6 +334,15 @@ def _iris_user_key(payload: dict[str, Any], sender: str) -> str:
     if user_id:
         return f"iris:{user_id}"
     return f"sender:{sender}" if sender else "sender:unknown"
+
+
+def _iris_message_source_key(payload: dict[str, Any]) -> str:
+    """Iris 원본 행에서 재전송에도 변하지 않는 메시지 키를 만든다."""
+    chat_id = str(payload.get("chat_id") or "").strip()
+    log_id = str(payload.get("_id") or payload.get("id") or "").strip()
+    if not chat_id or not log_id:
+        return ""
+    return f"iris:{chat_id}:{log_id}"
 
 
 def _parse_iris_feed(payload: dict[str, Any]) -> tuple[int, list[tuple[str, str]]] | None:
@@ -435,9 +452,25 @@ async def _daily_brief_loop() -> None:
         await asyncio.sleep(BRIEF_CHECK_SECONDS)
 
 
+async def _moderation_learning_loop() -> None:
+    while True:
+        try:
+            if bot.moderation_learning.needs_training():
+                await asyncio.to_thread(bot.moderation_learning.train)
+        except Exception:
+            _iris_logger.exception("moderation training failed")
+        await asyncio.sleep(MODERATION_TRAIN_CHECK_SECONDS)
+
+
 @app.on_event("startup")
 async def _start_daily_brief() -> None:
     app.state.daily_brief_task = asyncio.create_task(_daily_brief_loop())
+    app.state.moderation_warmup_task = asyncio.create_task(
+        asyncio.to_thread(bot.warm_up_chat_analyzer)
+    )
+    app.state.moderation_learning_task = asyncio.create_task(
+        _moderation_learning_loop()
+    )
 
 
 async def _enqueue_iris_reply(chat_id: str, reply: str) -> None:
@@ -467,7 +500,7 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
         return {"reply": "", "silent": True, "chat_id": chat_id}
 
     # 입장/퇴장 같은 피드(시스템) 메시지는 일반 채팅으로 세지 않는다.
-    # 입장(feedType 4)은 방별로 카운팅해서 2회차 이상이면 들낙 의심 문구를 낸다.
+    # 입장(feedType 4)은 방별로 카운팅해서 설정된 기준 이상이면 의심 문구를 낸다.
     feed = _parse_iris_feed(request.json)
     if feed is not None:
         feed_type, members = feed
@@ -506,14 +539,35 @@ async def iris_webhook(token: str, request: IrisMessageRequest) -> dict[str, Any
     sender = (request.sender or "").strip() or "개인톡사용자"
     user_key = _iris_user_key(request.json, sender)
 
+    # 일반 대화 원문은 학습 자료로 방별 보관한다. 명령어·개인톡·봇 메시지·
+    # 시스템 메시지는 제외되며, Iris의 chat_id와 _id로 중복을 막는다.
+    if request.room and _is_silent_message(text):
+        source_key = _iris_message_source_key(request.json)
+        if source_key:
+            bot.admin_store.record_moderation_corpus(
+                source_key,
+                normalize_room(room),
+                user_key,
+                text,
+                str(request.json.get("created_at") or ""),
+                "live",
+            )
+
     # 채팅 랭킹 집계. 명령어는 record_chat 안에서 걸러진다.
-    bot.record_chat(room, sender, user_key, text)
+    moderation_warning = bot.record_chat(room, sender, user_key, text)
     # 이미 방에 있는 사람은 첫 활동 때 '입장 1회'로 기준을 잡아둔다. 그래야
     # 추적 시작 전부터 있던 사람도 나갔다 들어오면 자동으로 2회차가 된다.
     member_id = str(request.json.get("user_id") or "").strip()
     if request.room and member_id and sender != "개인톡사용자":
         bot.admin_store.seed_member_present(normalize_room(room), member_id, sender)
     if _is_silent_message(text):
+        if moderation_warning:
+            await _enqueue_iris_reply(chat_id, moderation_warning)
+            return {
+                "reply": moderation_warning,
+                "silent": False,
+                "chat_id": chat_id,
+            }
         return {"reply": "", "silent": True, "chat_id": chat_id}
 
     response = await bot.handle(text, room=room, sender=sender, user_key=user_key)
@@ -598,12 +652,226 @@ class RoomPasswordChangeRequest(BaseModel):
     new_password: str
 
 
+class RoomAdminRequest(BaseModel):
+    room: str
+    nickname: str = ""
+    user_key: str = ""
+
+
+class RaffleRecipientRequest(BaseModel):
+    room: str
+    user_key: str
+
+
+class TokenRaffleRecipientRequest(BaseModel):
+    user_key: str
+    room_password: str = ""
+
+
+class RoomSiteIssueRequest(BaseModel):
+    room: str
+    password: str = ""
+    recovery_word: str = ""
+
+
+class RoomSettingsRequest(BaseModel):
+    room: str
+    join_alert_threshold: int | None = None
+    shop_registration_admin_only: bool | None = None
+    shop_registration_fee: int | None = None
+    shop_registration_deposit: int | None = None
+    moderation_observation_enabled: bool | None = None
+    moderation_fragment_count: int | None = None
+    moderation_fragment_window: int | None = None
+    moderation_eums_count: int | None = None
+    moderation_fragment_warning_enabled: bool | None = None
+    moderation_eums_warning_enabled: bool | None = None
+
+
+class TokenRoomSettingsRequest(BaseModel):
+    join_alert_threshold: int | None = None
+    shop_registration_admin_only: bool | None = None
+    shop_registration_fee: int | None = None
+    shop_registration_deposit: int | None = None
+    moderation_observation_enabled: bool | None = None
+    moderation_fragment_count: int | None = None
+    moderation_fragment_window: int | None = None
+    moderation_eums_count: int | None = None
+    moderation_fragment_warning_enabled: bool | None = None
+    moderation_eums_warning_enabled: bool | None = None
+    room_password: str = ""
+
+
+class ModerationReviewRequest(BaseModel):
+    room: str = ""
+    incident_id: int
+    status: str
+    room_password: str = ""
+
+
 def _require_room_password(room: str, password: str) -> None:
     """방 비밀번호가 설정돼 있으면 일치할 때만 통과시킨다."""
     if not bot.admin_store.has_room_password(room):
         return
     if not password or not bot.admin_store.check_room_password(room, password):
         raise HTTPException(status_code=403, detail="방 비밀번호가 올바르지 않습니다.")
+
+
+def _validate_join_alert_threshold(value: int) -> int:
+    if value < 2 or value > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="들낙 안내 기준 횟수는 2회부터 100회 사이로 설정해 주세요.",
+        )
+    return value
+
+
+def _validate_shop_registration_cost(value: int, label: str) -> int:
+    if value < 0 or value > 1_000_000:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label}은 0P부터 1,000,000P 사이로 설정해 주세요.",
+        )
+    return value
+
+
+def _validate_moderation_settings(
+    fragment_count: int, fragment_window: int, eums_count: int
+) -> tuple[int, int, int]:
+    if not 2 <= fragment_count <= 10:
+        raise HTTPException(status_code=400, detail="단타 기준은 2회부터 10회 사이로 설정해 주세요.")
+    if not 5 <= fragment_window <= 60:
+        raise HTTPException(status_code=400, detail="단타 관찰 시간은 5초부터 60초 사이로 설정해 주세요.")
+    if not 1 <= eums_count <= 10:
+        raise HTTPException(status_code=400, detail="음슴체 기준은 1회부터 10회 사이로 설정해 주세요.")
+    return fragment_count, fragment_window, eums_count
+
+
+def _save_moderation_settings(
+    room: str, request: RoomSettingsRequest | TokenRoomSettingsRequest
+) -> None:
+    supplied = any(
+        value is not None
+        for value in (
+            request.moderation_observation_enabled,
+            request.moderation_fragment_count,
+            request.moderation_fragment_window,
+            request.moderation_eums_count,
+            request.moderation_fragment_warning_enabled,
+            request.moderation_eums_warning_enabled,
+        )
+    )
+    if not supplied:
+        return
+    current = bot.admin_store.get_moderation_settings(room)
+    enabled = (
+        request.moderation_observation_enabled
+        if request.moderation_observation_enabled is not None
+        else bool(current["enabled"])
+    )
+    fragment_count, fragment_window, eums_count = _validate_moderation_settings(
+        request.moderation_fragment_count
+        if request.moderation_fragment_count is not None
+        else int(current["fragment_count"]),
+        request.moderation_fragment_window
+        if request.moderation_fragment_window is not None
+        else int(current["fragment_window"]),
+        request.moderation_eums_count
+        if request.moderation_eums_count is not None
+        else int(current["eums_count"]),
+    )
+    bot.admin_store.set_moderation_settings(
+        room,
+        enabled,
+        fragment_count,
+        fragment_window,
+        eums_count,
+        request.moderation_fragment_warning_enabled
+        if request.moderation_fragment_warning_enabled is not None
+        else bool(current["fragment_warning_enabled"]),
+        request.moderation_eums_warning_enabled
+        if request.moderation_eums_warning_enabled is not None
+        else bool(current["eums_warning_enabled"]),
+    )
+
+
+def _room_settings_payload(room: str) -> dict[str, Any]:
+    fee, deposit = bot.admin_store.get_shop_registration_costs(room)
+    moderation = bot.admin_store.get_moderation_settings(room)
+    return {
+        "room": room,
+        "joinAlertThreshold": bot.admin_store.get_join_alert_threshold(room),
+        "shopRegistrationAdminOnly": bot.admin_store.is_shop_registration_admin_only(room),
+        "shopRegistrationFee": fee,
+        "shopRegistrationDeposit": deposit,
+        "moderationObservationEnabled": moderation["enabled"],
+        "moderationFragmentCount": moderation["fragment_count"],
+        "moderationFragmentWindow": moderation["fragment_window"],
+        "moderationEumsCount": moderation["eums_count"],
+        "moderationFragmentWarningEnabled": moderation[
+            "fragment_warning_enabled"
+        ],
+        "moderationEumsWarningEnabled": moderation["eums_warning_enabled"],
+        "moderationTrainingCounts": bot.admin_store.moderation_training_counts(room),
+        "moderationCorpusStats": bot.admin_store.moderation_corpus_stats(room),
+    }
+
+
+def _raffle_recipient_payload(room: str, query: str = "") -> dict[str, Any]:
+    candidates = bot.admin_store.search_raffle_recipient_candidates(room, query)
+    recipients = []
+    for record in bot.admin_store.raffle_recipient_history(room, limit=30):
+        received_date = datetime.strptime(record["received_date"], "%Y-%m-%d").date()
+        recipients.append(
+            {
+                "id": record["id"],
+                "nickname": record["display_name"],
+                "receivedDate": record["received_date"],
+                "excludedUntil": (
+                    received_date + timedelta(days=7)
+                ).isoformat(),
+            }
+        )
+    return {
+        "room": room,
+        "candidates": [
+            {"nickname": nickname, "userKey": user_key}
+            for nickname, user_key in candidates
+        ],
+        "recipients": recipients,
+    }
+
+
+def _register_raffle_recipient(room: str, user_key: str) -> dict[str, Any]:
+    member_names = {
+        known_key: nickname
+        for nickname, known_key in bot.admin_store.list_room_members(room)
+    }
+    nickname = member_names.get((user_key or "").strip())
+    if not nickname:
+        raise HTTPException(
+            status_code=404,
+            detail="방에서 확인된 사용자가 아닙니다. 닉네임을 다시 검색해 주세요.",
+        )
+    received_date = datetime.now(KST).date().isoformat()
+    recipient_id = bot.admin_store.register_raffle_recipient(
+        room, user_key, nickname, received_date
+    )
+    return {
+        "ok": True,
+        "id": recipient_id,
+        "nickname": nickname,
+        "receivedDate": received_date,
+    }
+
+
+@app.get("/ui-assets/kakaopogo-control-mark.webp", include_in_schema=False)
+async def control_mark() -> FileResponse:
+    return FileResponse(
+        CONTROL_MARK_PATH,
+        media_type="image/webp",
+        headers={"Cache-Control": "public, max-age=604800, immutable"},
+    )
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -627,6 +895,295 @@ async def admin_site_rooms() -> list[dict[str, Any]]:
         }
         for name, token in bot.admin_store.list_rooms()
     ]
+
+
+@app.post("/admin/site-room", dependencies=[Depends(_verify_bridge_key)])
+async def admin_issue_room_site(request: RoomSiteIssueRequest) -> dict[str, Any]:
+    room = normalize_room(request.room)
+    if not room:
+        raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
+
+    token = bot.admin_store.get_site_token_for_room_name(room)
+    if not token:
+        raise HTTPException(
+            status_code=404,
+            detail="봇이 확인한 채팅방이 아닙니다. 방에서 메시지를 한 번 보낸 뒤 다시 시도해 주세요.",
+        )
+
+    if not bot.admin_store.has_room_password(room):
+        password = request.password.strip()
+        recovery_word = request.recovery_word.strip()
+        if not password or not recovery_word:
+            raise HTTPException(
+                status_code=400,
+                detail="처음 발급할 때는 사이트 비밀번호와 복구 단어를 입력해 주세요.",
+            )
+        if len(password) < 4:
+            raise HTTPException(status_code=400, detail="비밀번호는 4자 이상으로 해주세요.")
+        if not bot.admin_store.set_room_password(room, password, recovery_word):
+            raise HTTPException(status_code=409, detail="방 비밀번호 설정 상태가 변경되었습니다. 다시 시도해 주세요.")
+
+    return {
+        "ok": True,
+        "room": room,
+        "path": f"/r/{token}",
+        "hasPassword": True,
+    }
+
+
+@app.get("/admin/room-members", dependencies=[Depends(_verify_bridge_key)])
+async def admin_room_members(room: str, query: str = "") -> list[dict[str, Any]]:
+    clean_room = normalize_room(room)
+    if not clean_room:
+        raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
+
+    admin_keys = {
+        user_key
+        for _display_name, role, user_key in bot.admin_store.list_admin_records(clean_room)
+        if role == "admin"
+    }
+    members = (
+        bot.admin_store.search_room_members(clean_room, query, limit=50)
+        if query.strip()
+        else bot.admin_store.list_room_members(clean_room)
+    )
+    return [
+        {
+            "nickname": nickname,
+            "userKey": user_key,
+            "isAdmin": user_key in admin_keys,
+        }
+        for nickname, user_key in members
+    ]
+
+
+@app.get("/admin/raffle-recipients", dependencies=[Depends(_verify_bridge_key)])
+async def admin_raffle_recipients(room: str, query: str = "") -> dict[str, Any]:
+    clean_room = normalize_room(room)
+    if not clean_room:
+        raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
+    return _raffle_recipient_payload(clean_room, query)
+
+
+@app.post("/admin/raffle-recipient", dependencies=[Depends(_verify_bridge_key)])
+async def admin_register_raffle_recipient(
+    request: RaffleRecipientRequest,
+) -> dict[str, Any]:
+    room = normalize_room(request.room)
+    if not room:
+        raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
+    return _register_raffle_recipient(room, request.user_key)
+
+
+@app.delete("/admin/raffle-recipient", dependencies=[Depends(_verify_bridge_key)])
+async def admin_remove_raffle_recipient(
+    room: str, recipient_id: int
+) -> dict[str, Any]:
+    clean_room = normalize_room(room)
+    if not clean_room:
+        raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
+    removed = bot.admin_store.remove_raffle_recipient(clean_room, recipient_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="상품 수령 기록을 찾지 못했습니다.")
+    nickname, received_date = removed
+    return {"ok": True, "nickname": nickname, "receivedDate": received_date}
+
+
+@app.get("/admin/room-settings", dependencies=[Depends(_verify_bridge_key)])
+async def admin_room_settings(room: str) -> dict[str, Any]:
+    clean_room = normalize_room(room)
+    if not clean_room:
+        raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
+    return _room_settings_payload(clean_room)
+
+
+@app.post("/admin/room-settings", dependencies=[Depends(_verify_bridge_key)])
+async def admin_save_room_settings(
+    request: RoomSettingsRequest,
+) -> dict[str, Any]:
+    room = normalize_room(request.room)
+    if not room:
+        raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
+    if (
+        request.join_alert_threshold is None
+        and request.shop_registration_admin_only is None
+        and request.shop_registration_fee is None
+        and request.shop_registration_deposit is None
+        and request.moderation_observation_enabled is None
+        and request.moderation_fragment_count is None
+        and request.moderation_fragment_window is None
+        and request.moderation_eums_count is None
+        and request.moderation_fragment_warning_enabled is None
+        and request.moderation_eums_warning_enabled is None
+    ):
+        raise HTTPException(status_code=400, detail="저장할 설정을 선택해 주세요.")
+    if request.join_alert_threshold is not None:
+        threshold = _validate_join_alert_threshold(request.join_alert_threshold)
+        bot.admin_store.set_join_alert_threshold(room, threshold)
+    if request.shop_registration_admin_only is not None:
+        bot.admin_store.set_shop_registration_admin_only(
+            room, request.shop_registration_admin_only
+        )
+    if (
+        request.shop_registration_fee is not None
+        or request.shop_registration_deposit is not None
+    ):
+        current_fee, current_deposit = bot.admin_store.get_shop_registration_costs(room)
+        fee = _validate_shop_registration_cost(
+            request.shop_registration_fee
+            if request.shop_registration_fee is not None
+            else current_fee,
+            "상품 등록 수수료",
+        )
+        deposit = _validate_shop_registration_cost(
+            request.shop_registration_deposit
+            if request.shop_registration_deposit is not None
+            else current_deposit,
+            "상품 등록 보증금",
+        )
+        bot.admin_store.set_shop_registration_costs(room, fee, deposit)
+    _save_moderation_settings(room, request)
+    return {"ok": True, **_room_settings_payload(room)}
+
+
+@app.get("/admin/moderation-incidents", dependencies=[Depends(_verify_bridge_key)])
+async def admin_moderation_incidents(
+    room: str, status: str = "all"
+) -> dict[str, Any]:
+    clean_room = normalize_room(room)
+    if not clean_room:
+        raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
+    return {
+        "items": bot.admin_store.list_moderation_incidents(clean_room, status),
+        "counts": bot.admin_store.moderation_training_counts(clean_room),
+        "corpus": bot.admin_store.moderation_corpus_stats(clean_room),
+    }
+
+
+@app.post("/admin/moderation-review", dependencies=[Depends(_verify_bridge_key)])
+async def admin_moderation_review(request: ModerationReviewRequest) -> dict[str, Any]:
+    room = normalize_room(request.room)
+    if not room:
+        raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
+    if request.status not in {"pending", "confirmed", "dismissed"}:
+        raise HTTPException(status_code=400, detail="올바른 판정 상태가 아닙니다.")
+    if not bot.admin_store.review_moderation_incident(
+        room, request.incident_id, request.status
+    ):
+        raise HTTPException(status_code=404, detail="관찰 사례를 찾지 못했습니다.")
+    if bot.moderation_learning.needs_training():
+        asyncio.create_task(asyncio.to_thread(bot.moderation_learning.train))
+    return {
+        "ok": True,
+        "counts": bot.admin_store.moderation_training_counts(room),
+        "corpus": bot.admin_store.moderation_corpus_stats(room),
+    }
+
+
+@app.get("/admin/moderation-model", dependencies=[Depends(_verify_bridge_key)])
+async def admin_moderation_model() -> dict[str, Any]:
+    return bot.moderation_learning.status()
+
+
+@app.post("/admin/moderation-train", dependencies=[Depends(_verify_bridge_key)])
+async def admin_moderation_train() -> dict[str, Any]:
+    return await asyncio.to_thread(bot.moderation_learning.train, True)
+
+
+@app.post("/admin/moderation-rollback", dependencies=[Depends(_verify_bridge_key)])
+async def admin_moderation_rollback() -> dict[str, Any]:
+    return await asyncio.to_thread(bot.moderation_learning.rollback)
+
+
+@app.get("/admin/room-admins", dependencies=[Depends(_verify_bridge_key)])
+async def admin_room_admins(room: str) -> list[dict[str, Any]]:
+    clean_room = normalize_room(room)
+    if not clean_room:
+        raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
+
+    records = bot.admin_store.list_admin_records(clean_room)
+    return [
+        {
+            "nickname": bot.admin_store.latest_nickname(clean_room, user_key)
+            or display_name,
+            "userKey": user_key,
+            "role": role,
+        }
+        for display_name, role, user_key in records
+        if role == "admin"
+    ]
+
+
+@app.post("/admin/room-admin", dependencies=[Depends(_verify_bridge_key)])
+async def admin_add_room_admin(request: RoomAdminRequest) -> dict[str, Any]:
+    room = normalize_room(request.room)
+    nickname = request.nickname.strip()
+    user_key = request.user_key.strip()
+    if not room:
+        raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
+
+    if not user_key:
+        if not nickname:
+            raise HTTPException(status_code=400, detail="관리자 닉네임을 입력해 주세요.")
+        user_key = bot.admin_store.resolve_user_key_by_nickname(room, nickname) or ""
+        if not user_key:
+            raise HTTPException(
+                status_code=404,
+                detail="이 방에서 해당 닉네임을 찾지 못했습니다. 그 사용자가 방에서 채팅한 뒤 다시 시도해 주세요.",
+            )
+
+    known_members = {
+        known_key: known_name
+        for known_name, known_key in bot.admin_store.list_room_members(room)
+    }
+    nickname = known_members.get(user_key) or nickname
+    if not nickname:
+        raise HTTPException(status_code=404, detail="사용자 정보를 찾지 못했습니다.")
+
+    existing_role = next(
+        (
+            role
+            for _display_name, role, known_key in bot.admin_store.list_admin_records(room)
+            if known_key == user_key
+        ),
+        None,
+    )
+    if existing_role == "owner":
+        raise HTTPException(status_code=409, detail="owner는 admin으로 변경할 수 없습니다.")
+
+    bot.admin_store.add_admin(
+        ChatUser(room=room, sender=nickname, user_key=user_key)
+    )
+    notification_queued = False
+    if existing_role != "admin":
+        chat_id = bot.admin_store.get_chat_id_for_room(room)
+        if chat_id:
+            await _enqueue_iris_reply(
+                chat_id, f"{nickname}님이 관리자로 등록되셨습니다."
+            )
+            notification_queued = True
+    return {
+        "ok": True,
+        "nickname": nickname,
+        "userKey": user_key,
+        "notificationQueued": notification_queued,
+    }
+
+
+@app.delete("/admin/room-admin", dependencies=[Depends(_verify_bridge_key)])
+async def admin_remove_room_admin(room: str, user_key: str) -> dict[str, Any]:
+    clean_room = normalize_room(room)
+    clean_key = user_key.strip()
+    if not clean_room or not clean_key:
+        raise HTTPException(status_code=400, detail="대상 방과 관리자를 선택해 주세요.")
+
+    removed = bot.admin_store.remove_admin_by_key(clean_room, clean_key)
+    if removed is None:
+        raise HTTPException(status_code=404, detail="등록된 관리자가 아닙니다.")
+    nickname, role = removed
+    if role == "owner":
+        raise HTTPException(status_code=409, detail="owner 권한은 이 화면에서 해제할 수 없습니다.")
+    return {"ok": True, "nickname": nickname}
 
 
 @app.get("/admin/commands", dependencies=[Depends(_verify_bridge_key)])
@@ -781,6 +1338,123 @@ async def site_commands(token: str) -> list[dict[str, Any]]:
         {"command": record.display_command, "length": len(record.response)}
         for record in records
     ]
+
+
+@app.get("/r/{token}/room-settings")
+async def site_room_settings(token: str) -> dict[str, Any]:
+    room = _room_for_token(token)
+    return _room_settings_payload(room)
+
+
+@app.post("/r/{token}/room-settings")
+async def site_save_room_settings(
+    token: str, request: TokenRoomSettingsRequest
+) -> dict[str, Any]:
+    room = _room_for_token(token)
+    _require_room_password(room, request.room_password)
+    if (
+        request.join_alert_threshold is None
+        and request.shop_registration_admin_only is None
+        and request.shop_registration_fee is None
+        and request.shop_registration_deposit is None
+        and request.moderation_observation_enabled is None
+        and request.moderation_fragment_count is None
+        and request.moderation_fragment_window is None
+        and request.moderation_eums_count is None
+        and request.moderation_fragment_warning_enabled is None
+        and request.moderation_eums_warning_enabled is None
+    ):
+        raise HTTPException(status_code=400, detail="저장할 설정을 선택해 주세요.")
+    if request.join_alert_threshold is not None:
+        threshold = _validate_join_alert_threshold(request.join_alert_threshold)
+        bot.admin_store.set_join_alert_threshold(room, threshold)
+    if request.shop_registration_admin_only is not None:
+        bot.admin_store.set_shop_registration_admin_only(
+            room, request.shop_registration_admin_only
+        )
+    if (
+        request.shop_registration_fee is not None
+        or request.shop_registration_deposit is not None
+    ):
+        current_fee, current_deposit = bot.admin_store.get_shop_registration_costs(room)
+        fee = _validate_shop_registration_cost(
+            request.shop_registration_fee
+            if request.shop_registration_fee is not None
+            else current_fee,
+            "상품 등록 수수료",
+        )
+        deposit = _validate_shop_registration_cost(
+            request.shop_registration_deposit
+            if request.shop_registration_deposit is not None
+            else current_deposit,
+            "상품 등록 보증금",
+        )
+        bot.admin_store.set_shop_registration_costs(room, fee, deposit)
+    _save_moderation_settings(room, request)
+    return {"ok": True, **_room_settings_payload(room)}
+
+
+@app.get("/r/{token}/raffle-recipients")
+async def site_raffle_recipients(
+    token: str, query: str = "", password: str = ""
+) -> dict[str, Any]:
+    room = _room_for_token(token)
+    _require_room_password(room, password)
+    return _raffle_recipient_payload(room, query)
+
+
+@app.post("/r/{token}/raffle-recipient")
+async def site_register_raffle_recipient(
+    token: str, request: TokenRaffleRecipientRequest
+) -> dict[str, Any]:
+    room = _room_for_token(token)
+    _require_room_password(room, request.room_password)
+    return _register_raffle_recipient(room, request.user_key)
+
+
+@app.delete("/r/{token}/raffle-recipient")
+async def site_remove_raffle_recipient(
+    token: str, recipient_id: int, password: str = ""
+) -> dict[str, Any]:
+    room = _room_for_token(token)
+    _require_room_password(room, password)
+    removed = bot.admin_store.remove_raffle_recipient(room, recipient_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="상품 수령 기록을 찾지 못했습니다.")
+    nickname, received_date = removed
+    return {"ok": True, "nickname": nickname, "receivedDate": received_date}
+
+
+@app.get("/r/{token}/moderation-incidents")
+async def site_moderation_incidents(
+    token: str, password: str = "", status: str = "all"
+) -> dict[str, Any]:
+    room = _room_for_token(token)
+    _require_room_password(room, password)
+    return {
+        "items": bot.admin_store.list_moderation_incidents(room, status),
+        "counts": bot.admin_store.moderation_training_counts(room),
+        "corpus": bot.admin_store.moderation_corpus_stats(room),
+    }
+
+
+@app.post("/r/{token}/moderation-review")
+async def site_moderation_review(
+    token: str, request: ModerationReviewRequest
+) -> dict[str, Any]:
+    room = _room_for_token(token)
+    _require_room_password(room, request.room_password)
+    if request.status not in {"pending", "confirmed", "dismissed"}:
+        raise HTTPException(status_code=400, detail="올바른 판정 상태가 아닙니다.")
+    if not bot.admin_store.review_moderation_incident(
+        room, request.incident_id, request.status
+    ):
+        raise HTTPException(status_code=404, detail="관찰 사례를 찾지 못했습니다.")
+    return {
+        "ok": True,
+        "counts": bot.admin_store.moderation_training_counts(room),
+        "corpus": bot.admin_store.moderation_corpus_stats(room),
+    }
 
 
 @app.get("/r/{token}/command")

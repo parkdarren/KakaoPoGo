@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import sqlite3
 from contextlib import contextmanager
@@ -10,6 +11,10 @@ from pathlib import Path
 
 
 DB_PATH = Path("data") / "kakaopogo.sqlite3"
+DEFAULT_JOIN_ALERT_THRESHOLD = 5
+DEFAULT_MODERATION_FRAGMENT_COUNT = 2
+DEFAULT_MODERATION_FRAGMENT_WINDOW = 12
+DEFAULT_MODERATION_EUMS_COUNT = 1
 
 
 @dataclass(frozen=True)
@@ -161,6 +166,29 @@ class AdminStore:
                     PRIMARY KEY (room, user_key, chat_date)
                 );
 
+                CREATE TABLE IF NOT EXISTS room_members (
+                    room TEXT NOT NULL,
+                    user_key TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (room, user_key)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_room_members_room_name
+                    ON room_members(room, display_name);
+
+                CREATE TABLE IF NOT EXISTS raffle_winners (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room TEXT NOT NULL,
+                    user_key TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    won_date TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_raffle_winners_room_user_date
+                    ON raffle_winners(room, user_key, won_date);
+
                 CREATE TABLE IF NOT EXISTS raid_cancel_stats (
                     room TEXT NOT NULL,
                     nickname_key TEXT NOT NULL,
@@ -196,6 +224,10 @@ class AdminStore:
                     price INTEGER NOT NULL,
                     created_by TEXT NOT NULL DEFAULT '',
                     created_name TEXT NOT NULL DEFAULT '',
+                    registration_fee INTEGER NOT NULL DEFAULT 0,
+                    registration_deposit INTEGER NOT NULL DEFAULT 0,
+                    deposit_owner_key TEXT NOT NULL DEFAULT '',
+                    deposit_owner_name TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (room, item_no)
                 );
@@ -223,6 +255,76 @@ class AdminStore:
                     room TEXT PRIMARY KEY,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     last_sent_date TEXT NOT NULL DEFAULT ''
+                );
+
+                CREATE TABLE IF NOT EXISTS room_settings (
+                    room TEXT PRIMARY KEY,
+                    join_alert_threshold INTEGER NOT NULL DEFAULT 5,
+                    shop_registration_admin_only INTEGER NOT NULL DEFAULT 1,
+                    shop_registration_fee INTEGER NOT NULL DEFAULT 100,
+                    shop_registration_deposit INTEGER NOT NULL DEFAULT 0,
+                    moderation_observation_enabled INTEGER NOT NULL DEFAULT 1,
+                    moderation_fragment_count INTEGER NOT NULL DEFAULT 2,
+                    moderation_fragment_window INTEGER NOT NULL DEFAULT 12,
+                    moderation_eums_count INTEGER NOT NULL DEFAULT 1,
+                    moderation_fragment_warning_enabled INTEGER NOT NULL DEFAULT 1,
+                    moderation_eums_warning_enabled INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS moderation_incidents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room TEXT NOT NULL,
+                    user_key TEXT NOT NULL,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    kind TEXT NOT NULL CHECK(kind IN ('fragment', 'eums')),
+                    score REAL NOT NULL DEFAULT 0,
+                    message_count INTEGER NOT NULL DEFAULT 0,
+                    preview TEXT NOT NULL DEFAULT '',
+                    messages_json TEXT NOT NULL DEFAULT '[]',
+                    features_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(status IN ('pending', 'confirmed', 'dismissed')),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    reviewed_at TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_moderation_incidents_room_status_created
+                    ON moderation_incidents(room, status, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS moderation_corpus (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_key TEXT NOT NULL UNIQUE,
+                    room TEXT NOT NULL,
+                    subject_hash TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    sent_at TEXT NOT NULL DEFAULT '',
+                    origin TEXT NOT NULL DEFAULT 'live'
+                        CHECK(origin IN ('live', 'history')),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_moderation_corpus_room_sent
+                    ON moderation_corpus(room, sent_at, id);
+
+                CREATE TABLE IF NOT EXISTS moderation_model_versions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    version TEXT NOT NULL UNIQUE,
+                    artifact_path TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'rejected'
+                        CHECK(status IN ('active', 'archived', 'rejected')),
+                    metrics_json TEXT NOT NULL DEFAULT '{}',
+                    reviewed_count INTEGER NOT NULL DEFAULT 0,
+                    synthetic_count INTEGER NOT NULL DEFAULT 0,
+                    trained_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_moderation_models_status_trained
+                    ON moderation_model_versions(status, trained_at DESC, id DESC);
+
+                CREATE TABLE IF NOT EXISTS app_migrations (
+                    migration_key TEXT PRIMARY KEY,
+                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS warn_permissions (
@@ -280,15 +382,144 @@ class AdminStore:
             # 등록자를 남기기 전에 올라온 상품은 등록자를 알 수 없다.
             self._ensure_column(conn, "shop_items", "created_by", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "shop_items", "created_name", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "shop_items", "registration_fee", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "shop_items", "registration_deposit", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "shop_items", "deposit_owner_key", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "shop_items", "deposit_owner_name", "TEXT NOT NULL DEFAULT ''")
             # 상품은 팔리면 지워지므로 등록자를 구매 시점에 함께 남긴다.
             self._ensure_column(conn, "shop_purchases", "seller_key", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "shop_purchases", "seller_name", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(
+                conn,
+                "room_settings",
+                "shop_registration_admin_only",
+                "INTEGER NOT NULL DEFAULT 1",
+            )
+            self._ensure_column(
+                conn,
+                "room_settings",
+                "shop_registration_fee",
+                "INTEGER NOT NULL DEFAULT 100",
+            )
+            self._ensure_column(
+                conn,
+                "room_settings",
+                "shop_registration_deposit",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            self._ensure_column(
+                conn,
+                "room_settings",
+                "moderation_observation_enabled",
+                "INTEGER NOT NULL DEFAULT 1",
+            )
+            self._ensure_column(
+                conn,
+                "room_settings",
+                "moderation_fragment_count",
+                "INTEGER NOT NULL DEFAULT 2",
+            )
+            self._ensure_column(
+                conn,
+                "room_settings",
+                "moderation_fragment_window",
+                "INTEGER NOT NULL DEFAULT 12",
+            )
+            self._ensure_column(
+                conn,
+                "room_settings",
+                "moderation_eums_count",
+                "INTEGER NOT NULL DEFAULT 1",
+            )
+            self._ensure_column(
+                conn,
+                "room_settings",
+                "moderation_fragment_warning_enabled",
+                "INTEGER NOT NULL DEFAULT 1",
+            )
+            self._ensure_column(
+                conn,
+                "room_settings",
+                "moderation_eums_warning_enabled",
+                "INTEGER NOT NULL DEFAULT 1",
+            )
+            self._ensure_column(
+                conn,
+                "moderation_incidents",
+                "messages_json",
+                "TEXT NOT NULL DEFAULT '[]'",
+            )
             conn.execute(
                 """
                 UPDATE custom_commands
                 SET display_command = COALESCE(display_command, command),
                     taught_by = COALESCE(taught_by, created_by),
                     taught_at = COALESCE(taught_at, updated_at)
+                """
+            )
+            migrated = conn.execute(
+                "SELECT 1 FROM app_migrations WHERE migration_key = ?",
+                ("moderation_fragment_min_two_v1",),
+            ).fetchone()
+            if migrated is None:
+                conn.execute(
+                    "UPDATE room_settings SET moderation_fragment_count = 2 "
+                    "WHERE moderation_fragment_count = 4"
+                )
+                conn.execute(
+                    "INSERT INTO app_migrations (migration_key) VALUES (?)",
+                    ("moderation_fragment_min_two_v1",),
+                )
+            eums_migrated = conn.execute(
+                "SELECT 1 FROM app_migrations WHERE migration_key = ?",
+                ("moderation_eums_immediate_v1",),
+            ).fetchone()
+            if eums_migrated is None:
+                conn.execute(
+                    "UPDATE room_settings SET moderation_eums_count = 1"
+                )
+                conn.execute(
+                    "INSERT INTO app_migrations (migration_key) VALUES (?)",
+                    ("moderation_eums_immediate_v1",),
+                )
+
+            # 기존 설치에도 방별 최신 사용자 목록을 채운다. 이후 메시지를 받을
+            # 때마다 room_members가 갱신되므로 이 작업은 비어 있는 키만 보완한다.
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO room_members (room, user_key, display_name)
+                SELECT c.room, c.user_key, c.display_name
+                FROM chat_stats AS c
+                WHERE c.user_key != '' AND c.display_name != ''
+                  AND c.chat_date = (
+                      SELECT MAX(c2.chat_date)
+                      FROM chat_stats AS c2
+                      WHERE c2.room = c.room AND c2.user_key = c.user_key
+                  )
+                """
+            )
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO room_members (room, user_key, display_name)
+                SELECT room, user_key, display_name
+                FROM attendance
+                WHERE user_key != '' AND display_name != ''
+                """
+            )
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO room_members (room, user_key, display_name)
+                SELECT room, 'iris:' || user_id, nickname
+                FROM room_join_counts
+                WHERE user_id != '' AND nickname != ''
+                """
+            )
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO room_members (room, user_key, display_name)
+                SELECT room, user_key, display_name
+                FROM room_admins
+                WHERE user_key != '' AND display_name != ''
                 """
             )
 
@@ -497,6 +728,72 @@ class AdminStore:
             )
         return item_no
 
+    def add_shop_item_with_charge(
+        self,
+        room: str,
+        name: str,
+        price: int,
+        created_by: str,
+        created_name: str,
+        registration_fee: int,
+        registration_deposit: int,
+    ) -> tuple[int, int] | None:
+        """포인트를 차감하면서 상품을 등록한다.
+
+        잔액 확인, 차감, 상품 생성을 한 트랜잭션에서 처리한다. 포인트가
+        부족하면 아무것도 바꾸지 않고 None을 반환한다.
+        """
+        fee = max(0, int(registration_fee))
+        deposit = max(0, int(registration_deposit))
+        total_charge = fee + deposit
+        with self._connect() as conn:
+            points_row = conn.execute(
+                "SELECT points FROM attendance WHERE room = ? AND user_key = ?",
+                (room, created_by),
+            ).fetchone()
+            current_points = int(points_row["points"]) if points_row else 0
+            if current_points < total_charge:
+                return None
+
+            if total_charge:
+                conn.execute(
+                    """
+                    UPDATE attendance
+                    SET points = points - ?, display_name = ?
+                    WHERE room = ? AND user_key = ?
+                    """,
+                    (total_charge, created_name, room, created_by),
+                )
+
+            row = conn.execute(
+                "SELECT COALESCE(MAX(item_no), 0) AS last FROM shop_items WHERE room = ?",
+                (room,),
+            ).fetchone()
+            item_no = row["last"] + 1
+            conn.execute(
+                """
+                INSERT INTO shop_items (
+                    room, item_no, name, price, created_by, created_name,
+                    registration_fee, registration_deposit,
+                    deposit_owner_key, deposit_owner_name
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    room,
+                    item_no,
+                    name,
+                    price,
+                    created_by,
+                    created_name,
+                    fee,
+                    deposit,
+                    created_by if deposit else "",
+                    created_name if deposit else "",
+                ),
+            )
+        return (item_no, current_points - total_charge)
+
     def list_shop_items(self, room: str) -> list[tuple[int, str, int, str, str]]:
         """(번호, 상품명, 가격, 등록자 user_key, 등록 당시 닉네임)."""
         with self._connect() as conn:
@@ -533,6 +830,26 @@ class AdminStore:
         if row is None:
             return None
         return (row["name"], row["price"], row["created_by"], row["created_name"])
+
+    def get_shop_item_deposit(
+        self, room: str, item_no: int
+    ) -> tuple[int, str, str]:
+        """상품 판매 시 돌려줄 (보증금, 대상 user_key, 등록 당시 닉네임)."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT registration_deposit, deposit_owner_key, deposit_owner_name
+                FROM shop_items WHERE room = ? AND item_no = ?
+                """,
+                (room, item_no),
+            ).fetchone()
+        if row is None:
+            return (0, "", "")
+        return (
+            int(row["registration_deposit"]),
+            row["deposit_owner_key"],
+            row["deposit_owner_name"],
+        )
 
     def remove_shop_item(self, room: str, item_no: int) -> tuple[str, int] | None:
         """상품을 지우고 (이름, 남은 개수)를 돌려준다.
@@ -799,16 +1116,97 @@ class AdminStore:
         # 숫자 -> 영문 순. 영문은 같은 글자면 소문자 먼저(aAbBcC 순).
         return sorted((row["nickname"] for row in rows), key=_raid_sort_key)
 
-    def refresh_admin_display_name(self, user_key: str, display_name: str) -> None:
-        """관리자/오너의 표시 닉네임을 최신으로 갱신한다(바뀌었을 때만)."""
+    def observe_member_identity(
+        self, room: str, user_key: str, display_name: str
+    ) -> None:
+        """방에서 확인한 사용자의 최신 닉네임을 관련 표시용 기록에 반영한다."""
+        room = (room or "").strip()
+        user_key = (user_key or "").strip()
+        display_name = (display_name or "").strip()
+        if not room or not user_key or not display_name:
+            return
+
         with self._connect() as conn:
             conn.execute(
                 """
-                UPDATE room_admins SET display_name = ?
-                WHERE user_key = ? AND display_name != ?
+                INSERT INTO room_members (room, user_key, display_name, last_seen_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(room, user_key)
+                DO UPDATE SET display_name = excluded.display_name,
+                              last_seen_at = CURRENT_TIMESTAMP
                 """,
-                (display_name, user_key, display_name),
+                (room, user_key, display_name),
             )
+            conn.execute(
+                """
+                UPDATE room_admins SET display_name = ?
+                WHERE room = ? AND user_key = ? AND display_name != ?
+                """,
+                (display_name, room, user_key, display_name),
+            )
+            conn.execute(
+                "UPDATE attendance SET display_name = ? "
+                "WHERE room = ? AND user_key = ? AND display_name != ?",
+                (display_name, room, user_key, display_name),
+            )
+            conn.execute(
+                "UPDATE admin_requests SET display_name = ? "
+                "WHERE room = ? AND user_key = ? AND display_name != ?",
+                (display_name, room, user_key, display_name),
+            )
+            conn.execute(
+                "UPDATE warnings SET nickname = ? "
+                "WHERE room = ? AND user_key = ? AND nickname != ?",
+                (display_name, room, user_key, display_name),
+            )
+            conn.execute(
+                "UPDATE warn_permissions SET nickname = ? "
+                "WHERE room = ? AND user_key = ? AND nickname != ?",
+                (display_name, room, user_key, display_name),
+            )
+            conn.execute(
+                "UPDATE raffle_winners SET display_name = ? "
+                "WHERE room = ? AND user_key = ? AND display_name != ?",
+                (display_name, room, user_key, display_name),
+            )
+            conn.execute(
+                "UPDATE shop_purchases SET nickname = ? "
+                "WHERE room = ? AND user_key = ? AND nickname != ?",
+                (display_name, room, user_key, display_name),
+            )
+            conn.execute(
+                "UPDATE shop_purchases SET seller_name = ? "
+                "WHERE room = ? AND seller_key = ? AND seller_name != ?",
+                (display_name, room, user_key, display_name),
+            )
+            conn.execute(
+                "UPDATE shop_items SET created_name = ? "
+                "WHERE room = ? AND created_by = ? AND created_name != ?",
+                (display_name, room, user_key, display_name),
+            )
+            conn.execute(
+                "UPDATE shop_items SET deposit_owner_name = ? "
+                "WHERE room = ? AND deposit_owner_key = ? "
+                "AND deposit_owner_name != ?",
+                (display_name, room, user_key, display_name),
+            )
+            conn.execute(
+                "UPDATE moderation_incidents SET display_name = ? "
+                "WHERE room = ? AND user_key = ? AND display_name != ?",
+                (display_name, room, user_key, display_name),
+            )
+            if user_key.startswith("iris:"):
+                conn.execute(
+                    "UPDATE room_join_counts SET nickname = ? "
+                    "WHERE room = ? AND user_id = ? AND nickname != ?",
+                    (display_name, room, user_key[5:], display_name),
+                )
+
+    def refresh_admin_display_name(
+        self, room: str, user_key: str, display_name: str
+    ) -> None:
+        """이전 호출부용 별칭. 최신 방 사용자 정보를 함께 갱신한다."""
+        self.observe_member_identity(room, user_key, display_name)
 
     def record_chat_message(
         self,
@@ -818,6 +1216,8 @@ class AdminStore:
         today: str,
     ) -> None:
         """방·사람·날짜별 채팅 수를 1 올린다."""
+        if display_name != "개인톡사용자":
+            self.observe_member_identity(room, user_key, display_name)
         with self._connect() as conn:
             conn.execute(
                 """
@@ -844,6 +1244,189 @@ class AdminStore:
                 (room, today),
             ).fetchall()
         return [(row["display_name"], row["n"]) for row in rows]
+
+    def raffle_candidates(
+        self,
+        room: str,
+        today: str,
+        excluded_after: str | None = None,
+    ) -> list[tuple[str, str, int]]:
+        """오늘 활동한 추첨 후보의 (user_key, 닉네임, 활동량).
+
+        excluded_after가 있으면 그 날짜보다 나중에 당첨된 사용자를 제외한다.
+        닉네임이 바뀌거나 같은 닉네임이 여러 명이어도 user_key로 구분한다.
+        """
+        with self._connect() as conn:
+            if excluded_after is None:
+                rows = conn.execute(
+                    """
+                    SELECT user_key, display_name, message_count AS n
+                    FROM chat_stats
+                    WHERE room = ? AND chat_date = ? AND message_count > 0
+                    ORDER BY user_key
+                    """,
+                    (room, today),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT c.user_key, c.display_name, c.message_count AS n
+                    FROM chat_stats AS c
+                    WHERE c.room = ? AND c.chat_date = ? AND c.message_count > 0
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM raffle_winners AS w
+                          WHERE w.room = c.room
+                            AND w.user_key = c.user_key
+                            AND w.won_date > ?
+                      )
+                    ORDER BY c.user_key
+                    """,
+                    (room, today, excluded_after),
+                ).fetchall()
+        return [(row["user_key"], row["display_name"], row["n"]) for row in rows]
+
+    def record_raffle_winner(
+        self,
+        room: str,
+        user_key: str,
+        display_name: str,
+        won_date: str,
+    ) -> None:
+        """이전 호출부와의 호환을 위해 상품 수령 이력으로 기록한다."""
+        self.register_raffle_recipient(room, user_key, display_name, won_date)
+
+    def register_raffle_recipient(
+        self,
+        room: str,
+        user_key: str,
+        display_name: str,
+        received_date: str,
+    ) -> int:
+        """실제로 상품을 받은 사용자를 기록하고 해당 기록 ID를 돌려준다."""
+        room = (room or "").strip()
+        user_key = (user_key or "").strip()
+        display_name = (display_name or "").strip()
+        received_date = (received_date or "").strip()
+        if not room or not user_key or not display_name or not received_date:
+            raise ValueError("상품 수령자 정보가 올바르지 않습니다.")
+
+        with self._connect() as conn:
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM raffle_winners
+                WHERE room = ? AND user_key = ? AND won_date = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (room, user_key, received_date),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE raffle_winners
+                    SET display_name = ?
+                    WHERE id = ?
+                    """,
+                    (display_name, existing["id"]),
+                )
+                return int(existing["id"])
+
+            cursor = conn.execute(
+                """
+                INSERT INTO raffle_winners (room, user_key, display_name, won_date)
+                VALUES (?, ?, ?, ?)
+                """,
+                (room, user_key, display_name, received_date),
+            )
+            return int(cursor.lastrowid)
+
+    def search_raffle_recipient_candidates(
+        self, room: str, query: str = "", limit: int = 20
+    ) -> list[tuple[str, str]]:
+        """방에서 확인된 사용자 중 닉네임 일부가 일치하는 후보를 돌려준다."""
+        return self.search_room_members(room, query, limit)
+
+    def search_room_members(
+        self, room: str, query: str = "", limit: int = 20
+    ) -> list[tuple[str, str]]:
+        """방 사용자 닉네임을 부분 검색한다. 앞부분 일치를 먼저 보여준다."""
+        needle = (query or "").strip().casefold()
+        safe_limit = max(1, min(int(limit), 50))
+        matches = [
+            (nickname, user_key)
+            for nickname, user_key in self.list_room_members(room)
+            if not needle or needle in nickname.casefold()
+        ]
+        matches.sort(
+            key=lambda item: (
+                0 if needle and item[0].casefold().startswith(needle) else 1,
+                item[0].casefold(),
+                item[1],
+            )
+        )
+        return matches[:safe_limit]
+
+    def raffle_recipient_history(self, room: str, limit: int = 20) -> list[dict]:
+        """최근 상품 수령 등록 이력을 관리 화면용 형태로 돌려준다."""
+        safe_limit = max(1, min(int(limit), 100))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, user_key, display_name, won_date
+                FROM raffle_winners
+                WHERE room = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                ((room or "").strip(), safe_limit),
+            ).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "user_key": row["user_key"],
+                "display_name": row["display_name"],
+                "received_date": row["won_date"],
+            }
+            for row in rows
+        ]
+
+    def remove_raffle_recipient(self, room: str, recipient_id: int) -> tuple[str, str] | None:
+        """잘못 등록한 상품 수령 이력을 취소한다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT display_name, won_date
+                FROM raffle_winners
+                WHERE room = ? AND id = ?
+                """,
+                ((room or "").strip(), int(recipient_id)),
+            ).fetchone()
+            if not row:
+                return None
+            conn.execute(
+                "DELETE FROM raffle_winners WHERE room = ? AND id = ?",
+                ((room or "").strip(), int(recipient_id)),
+            )
+        return row["display_name"], row["won_date"]
+
+    def raffle_winner_history(
+        self, room: str, limit: int = 20
+    ) -> list[tuple[str, str, str]]:
+        """최근 당첨 이력 (user_key, 당시 닉네임, 날짜)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_key, display_name, won_date
+                FROM raffle_winners
+                WHERE room = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (room, limit),
+            ).fetchall()
+        return [(row["user_key"], row["display_name"], row["won_date"]) for row in rows]
 
     def chat_ranking(
         self,
@@ -1076,6 +1659,25 @@ class AdminStore:
             (row["display_name"], row["total_days"], row["points"])
             for row in rows
         ]
+
+    def point_ranking(
+        self,
+        room: str,
+        limit: int = 20,
+    ) -> list[tuple[str, int]]:
+        """방의 보유 포인트 순위를 (닉네임, 포인트)로 돌려준다."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT display_name, points
+                FROM attendance
+                WHERE room = ? AND points > 0
+                ORDER BY points DESC, display_name COLLATE NOCASE ASC, user_key ASC
+                LIMIT ?
+                """,
+                (room, limit),
+            ).fetchall()
+        return [(row["display_name"], row["points"]) for row in rows]
 
     def is_owner(self, user: ChatUser) -> bool:
         return self.get_effective_role(user) == "owner"
@@ -1396,6 +1998,7 @@ class AdminStore:
             for table, key_col in (
                 ("custom_commands", "command"),
                 ("room_admins", "user_key"),
+                ("room_members", "user_key"),
                 ("room_join_counts", "user_id"),
                 ("warn_permissions", "user_key"),
                 ("shop_items", "item_no"),
@@ -1416,8 +2019,8 @@ class AdminStore:
                 )
                 moved[table] = cursor.rowcount
 
-            # 경고·구매 기록은 사람당 여러 건이라 중복 제거 없이 통째로 옮긴다.
-            for table in ("warnings", "shop_purchases"):
+            # 경고·구매·추첨 기록은 사람당 여러 건이라 중복 제거 없이 통째로 옮긴다.
+            for table in ("warnings", "shop_purchases", "raffle_winners"):
                 cursor = conn.execute(
                     f"UPDATE {table} SET room = ? WHERE room = ?",
                     (new_room, old_room),
@@ -1434,6 +2037,16 @@ class AdminStore:
                 "UPDATE event_notifications SET room = ? WHERE room = ?",
                 (new_room, old_room),
             )
+            conn.execute(
+                "DELETE FROM room_settings WHERE room = ? AND EXISTS "
+                "(SELECT 1 FROM room_settings WHERE room = ?)",
+                (old_room, new_room),
+            )
+            cursor = conn.execute(
+                "UPDATE room_settings SET room = ? WHERE room = ?",
+                (new_room, old_room),
+            )
+            moved["room_settings"] = cursor.rowcount
 
             cursor = conn.execute(
                 "UPDATE control_room_targets SET target_room = ? WHERE target_room = ?",
@@ -1547,6 +2160,570 @@ class AdminStore:
                 (room, user_id, nickname, new_count),
             )
         return (new_count, True)
+
+    def get_join_alert_threshold(self, room: str) -> int:
+        """방별 들낙 의심 안내 기준. 설정이 없으면 기본 5회다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT join_alert_threshold FROM room_settings WHERE room = ?",
+                ((room or "").strip(),),
+            ).fetchone()
+        return (
+            int(row["join_alert_threshold"])
+            if row
+            else DEFAULT_JOIN_ALERT_THRESHOLD
+        )
+
+    def set_join_alert_threshold(self, room: str, threshold: int) -> int:
+        """방별 들낙 의심 안내 기준을 저장하고 저장값을 돌려준다."""
+        clean_room = (room or "").strip()
+        if not clean_room:
+            raise ValueError("room is required")
+        value = int(threshold)
+        if value < 2 or value > 100:
+            raise ValueError("join alert threshold must be between 2 and 100")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO room_settings (room, join_alert_threshold)
+                VALUES (?, ?)
+                ON CONFLICT(room) DO UPDATE SET
+                    join_alert_threshold = excluded.join_alert_threshold,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (clean_room, value),
+            )
+        return value
+
+    def is_shop_registration_admin_only(self, room: str) -> bool:
+        """상품 등록을 owner/admin에게만 허용하는지 반환한다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT shop_registration_admin_only FROM room_settings WHERE room = ?",
+                ((room or "").strip(),),
+            ).fetchone()
+        return bool(row["shop_registration_admin_only"]) if row else True
+
+    def set_shop_registration_admin_only(self, room: str, admin_only: bool) -> bool:
+        """방별 상품 등록 권한을 저장한다. 설정이 없을 때의 기본값은 관리자 전용이다."""
+        clean_room = (room or "").strip()
+        if not clean_room:
+            raise ValueError("room is required")
+        value = 1 if admin_only else 0
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO room_settings (room, shop_registration_admin_only)
+                VALUES (?, ?)
+                ON CONFLICT(room) DO UPDATE SET
+                    shop_registration_admin_only = excluded.shop_registration_admin_only,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (clean_room, value),
+            )
+        return bool(value)
+
+    def get_shop_registration_costs(self, room: str) -> tuple[int, int]:
+        """일반 사용자 상품 등록 수수료와 보증금을 반환한다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT shop_registration_fee, shop_registration_deposit
+                FROM room_settings WHERE room = ?
+                """,
+                ((room or "").strip(),),
+            ).fetchone()
+        if row is None:
+            return (100, 0)
+        return (
+            int(row["shop_registration_fee"]),
+            int(row["shop_registration_deposit"]),
+        )
+
+    def set_shop_registration_costs(
+        self, room: str, fee: int, deposit: int
+    ) -> tuple[int, int]:
+        """일반 사용자 상품 등록 수수료와 보증금을 방별로 저장한다."""
+        clean_room = (room or "").strip()
+        if not clean_room:
+            raise ValueError("room is required")
+        fee_value = int(fee)
+        deposit_value = int(deposit)
+        if fee_value < 0 or deposit_value < 0:
+            raise ValueError("shop registration costs must be non-negative")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO room_settings (
+                    room, shop_registration_fee, shop_registration_deposit
+                )
+                VALUES (?, ?, ?)
+                ON CONFLICT(room) DO UPDATE SET
+                    shop_registration_fee = excluded.shop_registration_fee,
+                    shop_registration_deposit = excluded.shop_registration_deposit,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (clean_room, fee_value, deposit_value),
+            )
+        return (fee_value, deposit_value)
+
+    def get_moderation_settings(self, room: str) -> dict[str, int | bool]:
+        """방별 문체 관찰 설정을 반환한다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT moderation_observation_enabled,
+                       moderation_fragment_count,
+                       moderation_fragment_window,
+                       moderation_eums_count,
+                       moderation_fragment_warning_enabled,
+                       moderation_eums_warning_enabled
+                FROM room_settings WHERE room = ?
+                """,
+                ((room or "").strip(),),
+            ).fetchone()
+        if row is None:
+            return {
+                "enabled": True,
+                "fragment_count": DEFAULT_MODERATION_FRAGMENT_COUNT,
+                "fragment_window": DEFAULT_MODERATION_FRAGMENT_WINDOW,
+                "eums_count": DEFAULT_MODERATION_EUMS_COUNT,
+                "fragment_warning_enabled": True,
+                "eums_warning_enabled": True,
+            }
+        enabled = bool(row["moderation_observation_enabled"])
+        return {
+            "enabled": enabled,
+            "fragment_count": int(row["moderation_fragment_count"]),
+            "fragment_window": int(row["moderation_fragment_window"]),
+            "eums_count": int(row["moderation_eums_count"]),
+            "fragment_warning_enabled": enabled and bool(
+                row["moderation_fragment_warning_enabled"]
+            ),
+            "eums_warning_enabled": enabled
+            and bool(row["moderation_eums_warning_enabled"]),
+        }
+
+    def set_moderation_settings(
+        self,
+        room: str,
+        enabled: bool,
+        fragment_count: int,
+        fragment_window: int,
+        eums_count: int,
+        fragment_warning_enabled: bool = True,
+        eums_warning_enabled: bool = True,
+    ) -> dict[str, int | bool]:
+        """관찰 기준과 방에 보낼 단타·음슴체 경고 여부를 저장한다."""
+        clean_room = (room or "").strip()
+        if not clean_room:
+            raise ValueError("room is required")
+        fragment_count = int(fragment_count)
+        fragment_window = int(fragment_window)
+        eums_count = int(eums_count)
+        if not 2 <= fragment_count <= 10:
+            raise ValueError("fragment count must be between 2 and 10")
+        if not 5 <= fragment_window <= 60:
+            raise ValueError("fragment window must be between 5 and 60")
+        if not 1 <= eums_count <= 10:
+            raise ValueError("eums count must be between 1 and 10")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO room_settings (
+                    room, moderation_observation_enabled,
+                    moderation_fragment_count, moderation_fragment_window,
+                    moderation_eums_count,
+                    moderation_fragment_warning_enabled,
+                    moderation_eums_warning_enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(room) DO UPDATE SET
+                    moderation_observation_enabled = excluded.moderation_observation_enabled,
+                    moderation_fragment_count = excluded.moderation_fragment_count,
+                    moderation_fragment_window = excluded.moderation_fragment_window,
+                    moderation_eums_count = excluded.moderation_eums_count,
+                    moderation_fragment_warning_enabled = excluded.moderation_fragment_warning_enabled,
+                    moderation_eums_warning_enabled = excluded.moderation_eums_warning_enabled,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    clean_room,
+                    1 if enabled else 0,
+                    fragment_count,
+                    fragment_window,
+                    eums_count,
+                    1 if enabled and fragment_warning_enabled else 0,
+                    1 if enabled and eums_warning_enabled else 0,
+                ),
+            )
+        return self.get_moderation_settings(clean_room)
+
+    def record_moderation_incident(
+        self,
+        room: str,
+        user_key: str,
+        display_name: str,
+        kind: str,
+        score: float,
+        message_count: int,
+        preview: str,
+        features: dict[str, float | int | bool],
+        messages: tuple[str, ...] = (),
+        sent_at: tuple[str, ...] = (),
+    ) -> int:
+        """관찰 사례를 저장하고 이어지는 메시지는 최근 사례에 합친다."""
+        if kind not in {"fragment", "eums"}:
+            raise ValueError("unsupported moderation incident kind")
+        clean_room = (room or "").strip()
+        clean_user_key = (user_key or "").strip()
+        message_items = [
+            {
+                "text": (text or "").strip()[:160],
+                "sentAt": sent_at[index] if index < len(sent_at) else "",
+            }
+            for index, text in enumerate(messages)
+            if (text or "").strip()
+        ]
+        messages_json = json.dumps(
+            message_items, ensure_ascii=False, separators=(",", ":")
+        )
+        features_json = json.dumps(
+            features, ensure_ascii=False, separators=(",", ":")
+        )
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM moderation_incidents "
+                "WHERE created_at < datetime('now', '-30 days')"
+            )
+            recent = conn.execute(
+                """
+                SELECT id FROM moderation_incidents
+                WHERE room = ? AND user_key = ? AND kind = ? AND status = 'pending'
+                  AND created_at >= datetime('now', '-60 seconds')
+                ORDER BY created_at DESC, id DESC LIMIT 1
+                """,
+                (clean_room, clean_user_key, kind),
+            ).fetchone()
+            if recent is not None:
+                conn.execute(
+                    """
+                    UPDATE moderation_incidents
+                    SET display_name = ?, score = ?, message_count = ?, preview = ?,
+                        messages_json = ?, features_json = ?, created_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (
+                        (display_name or "").strip(),
+                        float(score),
+                        int(message_count),
+                        (preview or "")[:240],
+                        messages_json,
+                        features_json,
+                        int(recent["id"]),
+                    ),
+                )
+                return int(recent["id"])
+            cursor = conn.execute(
+                """
+                INSERT INTO moderation_incidents (
+                    room, user_key, display_name, kind, score,
+                    message_count, preview, messages_json, features_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    clean_room,
+                    clean_user_key,
+                    (display_name or "").strip(),
+                    kind,
+                    float(score),
+                    int(message_count),
+                    (preview or "")[:240],
+                    messages_json,
+                    features_json,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def list_moderation_incidents(
+        self, room: str, status: str = "all", limit: int = 50
+    ) -> list[dict[str, object]]:
+        """최신 관찰 사례를 관리자 화면용 사전 목록으로 반환한다."""
+        clauses = ["room = ?"]
+        params: list[object] = [(room or "").strip()]
+        if status in {"pending", "confirmed", "dismissed"}:
+            clauses.append("status = ?")
+            params.append(status)
+        params.append(max(1, min(int(limit), 200)))
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, user_key, display_name, kind, score, message_count,
+                       preview, messages_json, features_json, status, created_at, reviewed_at
+                FROM moderation_incidents
+                WHERE {' AND '.join(clauses)}
+                ORDER BY created_at DESC, id DESC LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        result: list[dict[str, object]] = []
+        for row in rows:
+            try:
+                features = json.loads(row["features_json"] or "{}")
+            except (TypeError, ValueError):
+                features = {}
+            try:
+                messages = json.loads(row["messages_json"] or "[]")
+            except (TypeError, ValueError):
+                messages = []
+            if not isinstance(messages, list) or not messages:
+                messages = [
+                    {"text": text.strip(), "sentAt": ""}
+                    for text in (row["preview"] or "").split(" / ")
+                    if text.strip()
+                ]
+            result.append(
+                {
+                    "id": int(row["id"]),
+                    "userKey": row["user_key"],
+                    "displayName": row["display_name"],
+                    "kind": row["kind"],
+                    "score": float(row["score"]),
+                    "messageCount": int(row["message_count"]),
+                    "preview": row["preview"],
+                    "messages": messages,
+                    "features": features,
+                    "status": row["status"],
+                    "createdAt": row["created_at"],
+                    "reviewedAt": row["reviewed_at"],
+                }
+            )
+        return result
+
+    def review_moderation_incident(
+        self, room: str, incident_id: int, status: str
+    ) -> bool:
+        """관리자 판정을 학습 라벨로 저장한다."""
+        if status not in {"pending", "confirmed", "dismissed"}:
+            raise ValueError("unsupported moderation review status")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE moderation_incidents
+                SET status = ?,
+                    reviewed_at = CASE WHEN ? = 'pending' THEN NULL ELSE CURRENT_TIMESTAMP END
+                WHERE room = ? AND id = ?
+                """,
+                (status, status, (room or "").strip(), int(incident_id)),
+            )
+            return cursor.rowcount > 0
+
+    def moderation_training_counts(self, room: str) -> dict[str, int]:
+        """방별 대기·정확·오탐 라벨 수를 반환한다."""
+        counts = {"pending": 0, "confirmed": 0, "dismissed": 0}
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT status, COUNT(*) AS n FROM moderation_incidents
+                WHERE room = ? GROUP BY status
+                """,
+                ((room or "").strip(),),
+            ).fetchall()
+        for row in rows:
+            counts[row["status"]] = int(row["n"])
+        return counts
+
+    def moderation_training_examples(self, limit: int = 10000) -> list[dict[str, object]]:
+        """모든 방에서 관리자가 판정한 익명화 사례를 학습용으로 반환한다."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT kind, status, messages_json, preview
+                FROM moderation_incidents
+                WHERE status IN ('confirmed', 'dismissed')
+                ORDER BY reviewed_at DESC, id DESC LIMIT ?
+                """,
+                (max(1, min(int(limit), 10000)),),
+            ).fetchall()
+        examples: list[dict[str, object]] = []
+        for row in rows:
+            try:
+                saved = json.loads(row["messages_json"] or "[]")
+            except (TypeError, ValueError):
+                saved = []
+            messages = [
+                str(item.get("text") or "").strip()
+                for item in saved
+                if isinstance(item, dict) and str(item.get("text") or "").strip()
+            ]
+            if not messages:
+                messages = [
+                    text.strip()
+                    for text in str(row["preview"] or "").split(" / ")
+                    if text.strip()
+                ]
+            if messages:
+                examples.append(
+                    {
+                        "kind": row["kind"],
+                        "status": row["status"],
+                        "messages": messages,
+                    }
+                )
+        return examples
+
+    def reviewed_moderation_count(self) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM moderation_incidents "
+                "WHERE status IN ('confirmed', 'dismissed')"
+            ).fetchone()
+        return int(row["n"] or 0)
+
+    @staticmethod
+    def _moderation_model_payload(row: sqlite3.Row | None) -> dict[str, object] | None:
+        if row is None:
+            return None
+        try:
+            metrics = json.loads(row["metrics_json"] or "{}")
+        except (TypeError, ValueError):
+            metrics = {}
+        return {
+            "version": row["version"],
+            "artifactPath": row["artifact_path"],
+            "status": row["status"],
+            "metrics": metrics,
+            "reviewedCount": int(row["reviewed_count"]),
+            "syntheticCount": int(row["synthetic_count"]),
+            "trainedAt": row["trained_at"],
+        }
+
+    def active_moderation_model(self) -> dict[str, object] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT version, artifact_path, status, metrics_json,
+                       reviewed_count, synthetic_count, trained_at
+                FROM moderation_model_versions
+                WHERE status = 'active'
+                ORDER BY trained_at DESC, id DESC LIMIT 1
+                """
+            ).fetchone()
+        return self._moderation_model_payload(row)
+
+    def save_moderation_model(
+        self,
+        version: str,
+        artifact_path: str,
+        metrics: dict[str, object],
+        reviewed_count: int,
+        synthetic_count: int,
+        activate: bool,
+    ) -> None:
+        """새 모델을 기록하고 검증을 통과한 경우에만 활성 모델을 교체한다."""
+        status = "active" if activate else "rejected"
+        with self._connect() as conn:
+            if activate:
+                conn.execute(
+                    "UPDATE moderation_model_versions SET status = 'archived' "
+                    "WHERE status = 'active'"
+                )
+            conn.execute(
+                """
+                INSERT INTO moderation_model_versions (
+                    version, artifact_path, status, metrics_json,
+                    reviewed_count, synthetic_count
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    version,
+                    artifact_path,
+                    status,
+                    json.dumps(metrics, ensure_ascii=False, separators=(",", ":")),
+                    int(reviewed_count),
+                    int(synthetic_count),
+                ),
+            )
+
+    def rollback_moderation_model(self) -> bool:
+        """직전 보관 모델을 활성화하고 현재 모델은 보관 상태로 돌린다."""
+        with self._connect() as conn:
+            previous = conn.execute(
+                """
+                SELECT id FROM moderation_model_versions
+                WHERE status = 'archived'
+                ORDER BY trained_at DESC, id DESC LIMIT 1
+                """
+            ).fetchone()
+            if previous is None:
+                return False
+            conn.execute(
+                "UPDATE moderation_model_versions SET status = 'archived' "
+                "WHERE status = 'active'"
+            )
+            conn.execute(
+                "UPDATE moderation_model_versions SET status = 'active' WHERE id = ?",
+                (int(previous["id"]),),
+            )
+        return True
+
+    def record_moderation_corpus(
+        self,
+        source_key: str,
+        room: str,
+        user_key: str,
+        text: str,
+        sent_at: str = "",
+        origin: str = "live",
+    ) -> bool:
+        """일반 채팅 원문을 방별 학습 자료로 한 번만 저장한다.
+
+        사용자 식별값은 원문 대신 해시로 보관한다. source_key는 Iris의
+        chat_id와 메시지 _id 조합이라 웹훅이 재전송되어도 중복되지 않는다.
+        """
+        clean_source = (source_key or "").strip()
+        clean_room = (room or "").strip()
+        clean_user = (user_key or "").strip()
+        clean_text = (text or "").strip()
+        if not clean_source or not clean_room or not clean_user or not clean_text:
+            return False
+        if origin not in {"live", "history"}:
+            raise ValueError("unsupported moderation corpus origin")
+        subject_hash = hashlib.sha256(clean_user.encode("utf-8")).hexdigest()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO moderation_corpus (
+                    source_key, room, subject_hash, text, sent_at, origin
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    clean_source,
+                    clean_room,
+                    subject_hash,
+                    clean_text[:1000],
+                    (sent_at or "").strip(),
+                    origin,
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def moderation_corpus_stats(self, room: str) -> dict[str, object]:
+        """방별 학습 원문 수와 수집 기간을 반환한다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS total,
+                       MIN(NULLIF(sent_at, '')) AS first_at,
+                       MAX(NULLIF(sent_at, '')) AS last_at
+                FROM moderation_corpus WHERE room = ?
+                """,
+                ((room or "").strip(),),
+            ).fetchone()
+        return {
+            "total": int(row["total"] or 0),
+            "firstAt": row["first_at"] or "",
+            "lastAt": row["last_at"] or "",
+        }
 
     def seed_member_present(self, room: str, user_id: str, nickname: str) -> None:
         """이미 방에 있는 사람을 '입장 1회'로 기준 잡는다. (추적 시작 전 멤버용)
@@ -1664,6 +2841,80 @@ class AdminStore:
             ).fetchone()
         return f"iris:{row['user_id']}" if row else None
 
+    def list_room_members(self, room: str) -> list[tuple[str, str]]:
+        """봇이 방에서 확인한 사용자를 (닉네임, user_key)로 돌려준다.
+
+        카카오가 방 전체 멤버 목록 API를 제공하지 않으므로 채팅, 출석, 입장
+        기록을 합친다. 같은 사용자는 가장 최근에 확인한 닉네임 하나만 보인다.
+        """
+        room = (room or "").strip()
+        if not room:
+            return []
+
+        members: dict[str, str] = {}
+        with self._connect() as conn:
+            member_rows = conn.execute(
+                """
+                SELECT user_key, display_name
+                FROM room_members
+                WHERE room = ? AND user_key != '' AND display_name != ''
+                ORDER BY last_seen_at DESC
+                """,
+                (room,),
+            ).fetchall()
+            chat_rows = conn.execute(
+                """
+                SELECT user_key, display_name
+                FROM chat_stats
+                WHERE room = ? AND user_key != '' AND display_name != ''
+                ORDER BY chat_date DESC, message_count DESC
+                """,
+                (room,),
+            ).fetchall()
+            attendance_rows = conn.execute(
+                """
+                SELECT user_key, display_name
+                FROM attendance
+                WHERE room = ? AND user_key != '' AND display_name != ''
+                ORDER BY last_check_in DESC
+                """,
+                (room,),
+            ).fetchall()
+            present_rows = conn.execute(
+                """
+                SELECT user_id, nickname
+                FROM room_join_counts
+                WHERE room = ? AND present = 1
+                  AND user_id != '' AND nickname != ''
+                ORDER BY last_join_at DESC
+                """,
+                (room,),
+            ).fetchall()
+            admin_rows = conn.execute(
+                """
+                SELECT user_key, display_name
+                FROM room_admins
+                WHERE room = ? AND user_key != '' AND display_name != ''
+                """,
+                (room,),
+            ).fetchall()
+
+        for row in member_rows:
+            members.setdefault(row["user_key"], row["display_name"])
+        for row in chat_rows:
+            members.setdefault(row["user_key"], row["display_name"])
+        for row in attendance_rows:
+            members.setdefault(row["user_key"], row["display_name"])
+        for row in present_rows:
+            members.setdefault(f"iris:{row['user_id']}", row["nickname"])
+        for row in admin_rows:
+            members.setdefault(row["user_key"], row["display_name"])
+
+        return sorted(
+            ((nickname, user_key) for user_key, nickname in members.items()),
+            key=lambda item: (item[0].casefold(), item[1]),
+        )
+
     def latest_nickname(self, room: str, user_key: str) -> str | None:
         """user_key 의 가장 최근 닉네임. 닉네임을 바꿨어도 최신 것을 돌려준다."""
         room = (room or "").strip()
@@ -1671,6 +2922,16 @@ class AdminStore:
         if not room or not user_key:
             return None
         with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT display_name FROM room_members
+                WHERE room = ? AND user_key = ?
+                LIMIT 1
+                """,
+                (room, user_key),
+            ).fetchone()
+            if row:
+                return row["display_name"]
             row = conn.execute(
                 """
                 SELECT display_name FROM chat_stats

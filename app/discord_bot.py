@@ -218,6 +218,11 @@ async def attendance_ranking(interaction: discord.Interaction) -> None:
     await _run_core_command(interaction, "/출석랭킹")
 
 
+@tree.command(name="포인트순위", description="이 채널의 포인트 순위 TOP 20을 봅니다.")
+async def point_ranking(interaction: discord.Interaction) -> None:
+    await _run_core_command(interaction, "/포인트순위")
+
+
 @tree.command(name="오너등록", description="이 디스코드 채널의 봇 owner를 등록합니다.")
 @app_commands.rename(code="코드")
 @app_commands.describe(code="서버에 설정한 OWNER_SETUP_CODE")

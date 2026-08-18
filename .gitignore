@@ -14,3 +14,7 @@ android/**/.gradle/
 android/**/local.properties
 android/**/*.apk
 android/**/*.aab
+note20_root/
+.coverage
+htmlcov/
+*.log

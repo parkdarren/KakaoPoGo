@@ -59,6 +59,8 @@ def test_parse_new_commands() -> None:
     assert parse_command("/출첵") == ("daily", "")
     assert parse_command("/ㅊㅊ") == ("daily", "")
     assert parse_command("/출석랭킹") == ("attendance_ranking", "")
+    assert parse_command("/포인트순위") == ("point_ranking", "")
+    assert parse_command("/포인트랭킹") == ("point_ranking", "")
     assert parse_command("/스킬 피카츄") == ("moves", "피카츄")
     assert parse_command("/기술 디아루가") == ("moves", "디아루가")
     assert parse_command("/cp 피카츄 25 15/15/15") == ("cp", "피카츄 25 15/15/15")
@@ -141,7 +143,147 @@ def test_admin_web_saves_long_command(tmp_path, monkeypatch) -> None:
 
     page = client.get("/admin")
     assert page.status_code == 200
+    assert "포고정보 운영센터" in page.text
+    assert "KAKAOPOGO LAB · OWNER" in page.text
+    assert "/ui-assets/kakaopogo-control-mark.webp" in page.text
+    assert "Trainer Lab control system" in page.text
+    assert '<details class="card" data-section="access" open>' in page.text
+    assert 'data-section="commands"' in page.text
+    assert '<details class="card" data-section="commands">' in page.text
+    assert 'data-section="room-settings"' in page.text
+    assert "initSectionState" in page.text
+    assert "initAccordionMotion" in page.text
     assert "명령어 관리" in page.text
+    assert "방 관리자" in page.text
+    assert "관리자 닉네임 검색" in page.text
+    assert "닉네임 일부를 입력하세요" in page.text
+    assert "방 운영 설정" in page.text
+    assert "들낙 안내 출력 기준 횟수" in page.text
+    assert "상품 등록을 오너와 관리자만 허용" in page.text
+    assert "일반 사용자 상품 등록 수수료" in page.text
+    assert "일반 사용자 상품 등록 보증금" in page.text
+    assert "전용 명령어 관리 사이트" in page.text
+    assert "단타 감지 시 채팅방 경고 출력" in page.text
+    assert "음슴체 감지 시 채팅방 경고 출력" in page.text
+
+    mark = client.get("/ui-assets/kakaopogo-control-mark.webp")
+    assert mark.status_code == 200
+    assert mark.headers["content-type"].startswith("image/webp")
+    assert len(mark.content) > 1_000
+
+    test_bot.admin_store.record_chat_message(
+        "종합방", "iris:sub", "부방장", "2026-08-11"
+    )
+    test_bot.admin_store.seed_member_present("종합방", "leader", "방장")
+
+    denied_members = client.get("/admin/room-members", params={"room": "종합방"})
+    assert denied_members.status_code == 403
+
+    members = client.get(
+        "/admin/room-members", headers=auth, params={"room": "종합방"}
+    )
+    assert members.status_code == 200
+    assert {(item["nickname"], item["userKey"]) for item in members.json()} == {
+        ("부방장", "iris:sub"),
+        ("방장", "iris:leader"),
+    }
+
+    for user_key, nickname in (
+        ("iris:park1", "박화영"),
+        ("iris:park2", "박화진"),
+        ("iris:kim", "김철수"),
+    ):
+        test_bot.admin_store.record_chat_message(
+            "종합방", user_key, nickname, "2026-08-11"
+        )
+    searched = client.get(
+        "/admin/room-members",
+        headers=auth,
+        params={"room": "종합방", "query": "박화"},
+    )
+    assert [item["nickname"] for item in searched.json()] == ["박화영", "박화진"]
+
+    added_by_name = client.post(
+        "/admin/room-admin",
+        headers=auth,
+        json={"room": "종합방", "nickname": "부방장"},
+    )
+    assert added_by_name.status_code == 200
+    assert added_by_name.json()["userKey"] == "iris:sub"
+
+    added_from_list = client.post(
+        "/admin/room-admin",
+        headers=auth,
+        json={"room": "종합방", "nickname": "방장", "user_key": "iris:leader"},
+    )
+    assert added_from_list.status_code == 200
+
+    admins = client.get(
+        "/admin/room-admins", headers=auth, params={"room": "종합방"}
+    )
+    assert {(item["nickname"], item["role"]) for item in admins.json()} == {
+        ("부방장", "admin"),
+        ("방장", "admin"),
+    }
+
+    removed_admin = client.delete(
+        "/admin/room-admin",
+        headers=auth,
+        params={"room": "종합방", "user_key": "iris:sub"},
+    )
+    assert removed_admin.status_code == 200
+    assert removed_admin.json()["nickname"] == "부방장"
+
+    denied_settings = client.get(
+        "/admin/room-settings", params={"room": "종합방"}
+    )
+    assert denied_settings.status_code == 403
+
+    default_settings = client.get(
+        "/admin/room-settings", headers=auth, params={"room": "종합방"}
+    )
+    assert default_settings.json()["joinAlertThreshold"] == 5
+    assert default_settings.json()["shopRegistrationAdminOnly"] is True
+    assert default_settings.json()["shopRegistrationFee"] == 100
+    assert default_settings.json()["shopRegistrationDeposit"] == 0
+
+    invalid_settings = client.post(
+        "/admin/room-settings",
+        headers=auth,
+        json={"room": "종합방", "join_alert_threshold": 1},
+    )
+    assert invalid_settings.status_code == 400
+
+    saved_settings = client.post(
+        "/admin/room-settings",
+        headers=auth,
+        json={"room": "종합방", "join_alert_threshold": 7},
+    )
+    assert saved_settings.json()["joinAlertThreshold"] == 7
+    assert test_bot.admin_store.get_join_alert_threshold("종합방") == 7
+
+    public_shop_registration = client.post(
+        "/admin/room-settings",
+        headers=auth,
+        json={
+            "room": "종합방",
+            "shop_registration_admin_only": False,
+            "shop_registration_fee": 150,
+            "shop_registration_deposit": 500,
+        },
+    )
+    assert public_shop_registration.json()["shopRegistrationAdminOnly"] is False
+    assert public_shop_registration.json()["shopRegistrationFee"] == 150
+    assert public_shop_registration.json()["shopRegistrationDeposit"] == 500
+    assert not test_bot.admin_store.is_shop_registration_admin_only("종합방")
+    assert test_bot.admin_store.get_shop_registration_costs("종합방") == (150, 500)
+
+    invalid_shop_cost = client.post(
+        "/admin/room-settings",
+        headers=auth,
+        json={"room": "종합방", "shop_registration_fee": -1},
+    )
+    assert invalid_shop_cost.status_code == 400
 
     long_text = "\n".join(f"{index}번째 줄 이벤트 안내" for index in range(120))
     assert len(long_text) > 1000
@@ -198,6 +340,283 @@ def test_admin_web_saves_long_command(tmp_path, monkeypatch) -> None:
     assert test_bot.admin_store.get_custom_command("종합방", "이벤") is None
 
 
+def test_admin_web_add_announces_new_manager_to_target_room(
+    tmp_path, monkeypatch
+) -> None:
+    import app.main as main_module
+
+    test_bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    monkeypatch.setattr(main_module, "bot", test_bot)
+    monkeypatch.setenv("BRIDGE_KEY", "admin-secret")
+    main_module._iris_outbox.clear()
+    test_bot.admin_store.touch_room("CHAT-ADMIN", "종합방")
+    test_bot.admin_store.record_chat_message(
+        "종합방", "iris:sub", "부방장", "2026-08-18"
+    )
+    client = TestClient(main_module.app)
+    auth = {"X-Bridge-Key": "admin-secret"}
+
+    added = client.post(
+        "/admin/room-admin",
+        headers=auth,
+        json={
+            "room": "종합방",
+            "nickname": "부방장",
+            "user_key": "iris:sub",
+        },
+    )
+
+    assert added.status_code == 200
+    assert added.json()["notificationQueued"] is True
+    assert main_module._iris_outbox == [
+        {
+            "type": "text",
+            "room": "CHAT-ADMIN",
+            "data": "부방장님이 관리자로 등록되셨습니다.",
+        }
+    ]
+
+    duplicate = client.post(
+        "/admin/room-admin",
+        headers=auth,
+        json={
+            "room": "종합방",
+            "nickname": "부방장",
+            "user_key": "iris:sub",
+        },
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.json()["notificationQueued"] is False
+    assert len(main_module._iris_outbox) == 1
+    main_module._iris_outbox.clear()
+
+
+def test_latest_nickname_updates_on_commands_and_stays_room_scoped(tmp_path) -> None:
+    from datetime import date
+
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
+    user_key = "iris:42"
+
+    store.add_admin(ChatUser(room="첫방", sender="예전닉", user_key=user_key))
+    store.add_admin(ChatUser(room="둘째방", sender="둘째방닉", user_key=user_key))
+    store.add_points("첫방", user_key, "예전닉", 10)
+    store.seed_member_present("첫방", "42", "입장기록닉")
+    store.register_raffle_recipient(
+        "첫방", user_key, "예전닉", date.today().isoformat()
+    )
+
+    # 명령어는 채팅 수에 포함되지 않지만 최신 닉네임은 즉시 반영돼야 한다.
+    assert bot.record_chat("첫방", "새닉네임", user_key, "/포인트") == ""
+    assert store.raffle_pool("첫방", date.today().isoformat()) == []
+    assert store.latest_nickname("첫방", user_key) == "새닉네임"
+    assert store.list_room_members("첫방") == [("새닉네임", user_key)]
+    assert store.attendance_ranking("첫방") == [("새닉네임", 0, 10)]
+    assert store.raffle_recipient_history("첫방")[0]["display_name"] == "새닉네임"
+    assert store.join_count_for_nickname("첫방", "새닉네임") == ("새닉네임", 1)
+
+    first_room_admin = store.list_admin_records("첫방")[0]
+    second_room_admin = store.list_admin_records("둘째방")[0]
+    assert first_room_admin[0] == "새닉네임"
+    assert second_room_admin[0] == "둘째방닉"
+
+
+def test_owner_can_issue_room_management_site(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    test_bot = PokemonGoBot(
+        admin_store=AdminStore(tmp_path / "test.sqlite3"),
+        owner_setup_code="test-setup-code",
+    )
+    monkeypatch.setattr(main_module, "bot", test_bot)
+    monkeypatch.setenv("BRIDGE_KEY", "admin-secret")
+    client = TestClient(main_module.app)
+    auth = {"X-Bridge-Key": "admin-secret"}
+
+    room = test_bot.admin_store.touch_room("CHAT-SITE", "사이트방")
+    token = room["token"]
+
+    denied = client.post("/admin/site-room", json={"room": "사이트방"})
+    assert denied.status_code == 403
+
+    unknown = client.post(
+        "/admin/site-room", headers=auth, json={"room": "없는방"}
+    )
+    assert unknown.status_code == 404
+
+    missing_password = client.post(
+        "/admin/site-room", headers=auth, json={"room": "사이트방"}
+    )
+    assert missing_password.status_code == 400
+    assert "비밀번호와 복구 단어" in missing_password.json()["detail"]
+
+    issued = client.post(
+        "/admin/site-room",
+        headers=auth,
+        json={
+            "room": "사이트방",
+            "password": "room-secret",
+            "recovery_word": "복구단어",
+        },
+    )
+    assert issued.status_code == 200
+    assert issued.json() == {
+        "ok": True,
+        "room": "사이트방",
+        "path": f"/r/{token}",
+        "hasPassword": True,
+    }
+    assert test_bot.admin_store.check_room_password("사이트방", "room-secret")
+    site_page = client.get(f"/r/{token}")
+    assert "트레이너룸 콘솔" in site_page.text
+    assert "KAKAOPOGO LAB · ROOM" in site_page.text
+    assert "/ui-assets/kakaopogo-control-mark.webp" in site_page.text
+    assert "방 운영 설정" in site_page.text
+    assert 'data-section="commands"' in site_page.text
+    assert '<details class="card" data-section="commands">' in site_page.text
+    assert 'data-section="room-settings"' in site_page.text
+    assert "initSectionState" in site_page.text
+    assert "initAccordionMotion" in site_page.text
+    assert "상품 등록을 오너와 관리자만 허용" in site_page.text
+    assert "일반 사용자 상품 등록 수수료" in site_page.text
+    assert "일반 사용자 상품 등록 보증금" in site_page.text
+
+    token_settings = client.get(f"/r/{token}/room-settings")
+    assert token_settings.json()["joinAlertThreshold"] == 5
+    assert token_settings.json()["shopRegistrationAdminOnly"] is True
+    assert token_settings.json()["shopRegistrationFee"] == 100
+    assert token_settings.json()["shopRegistrationDeposit"] == 0
+
+    wrong_settings = client.post(
+        f"/r/{token}/room-settings",
+        json={"join_alert_threshold": 8, "room_password": "wrong"},
+    )
+    assert wrong_settings.status_code == 403
+
+    token_saved = client.post(
+        f"/r/{token}/room-settings",
+        json={
+            "join_alert_threshold": 8,
+            "shop_registration_admin_only": False,
+            "shop_registration_fee": 200,
+            "shop_registration_deposit": 700,
+            "room_password": "room-secret",
+        },
+    )
+    assert token_saved.json()["joinAlertThreshold"] == 8
+    assert token_saved.json()["shopRegistrationAdminOnly"] is False
+    assert token_saved.json()["shopRegistrationFee"] == 200
+    assert token_saved.json()["shopRegistrationDeposit"] == 700
+    assert test_bot.admin_store.get_join_alert_threshold("사이트방") == 8
+    assert not test_bot.admin_store.is_shop_registration_admin_only("사이트방")
+    assert test_bot.admin_store.get_shop_registration_costs("사이트방") == (200, 700)
+
+    # 다시 확인해도 기존 고정 링크를 그대로 돌려준다.
+    reissued = client.post(
+        "/admin/site-room", headers=auth, json={"room": "사이트방"}
+    )
+    assert reissued.status_code == 200
+    assert reissued.json()["path"] == f"/r/{token}"
+    assert client.get(f"/r/{token}/info").json()["room"] == "사이트방"
+
+
+def test_raffle_recipient_search_register_and_cancel(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    from datetime import date, timedelta
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    test_bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
+    monkeypatch.setattr(main_module, "bot", test_bot)
+    monkeypatch.setenv("BRIDGE_KEY", "admin-secret")
+    client = TestClient(main_module.app)
+    auth = {"X-Bridge-Key": "admin-secret"}
+
+    room = store.touch_room("CHAT-RAFFLE", "수령방")
+    token = room["token"]
+    assert store.set_room_password("수령방", "room-secret", "복구단어")
+    today = date.today().isoformat()
+    for user_key, nickname in (
+        ("iris:1", "박화영"),
+        ("iris:2", "박화진"),
+        ("iris:3", "박화명"),
+        ("iris:4", "김철수"),
+    ):
+        store.record_chat_message("수령방", user_key, nickname, today)
+
+    searched = client.get(
+        "/admin/raffle-recipients",
+        headers=auth,
+        params={"room": "수령방", "query": "박화"},
+    )
+    assert searched.status_code == 200
+    assert [item["nickname"] for item in searched.json()["candidates"]] == [
+        "박화명",
+        "박화영",
+        "박화진",
+    ]
+
+    registered = client.post(
+        "/admin/raffle-recipient",
+        headers=auth,
+        json={"room": "수령방", "user_key": "iris:1"},
+    )
+    assert registered.status_code == 200
+    recipient_id = registered.json()["id"]
+    cutoff = (date.today() - timedelta(days=7)).isoformat()
+    assert "iris:1" not in {
+        user_key
+        for user_key, _nickname, _count in store.raffle_candidates(
+            "수령방", today, excluded_after=cutoff
+        )
+    }
+
+    # 같은 날 같은 사람을 다시 눌러도 기록은 한 건만 유지한다.
+    duplicate = client.post(
+        "/admin/raffle-recipient",
+        headers=auth,
+        json={"room": "수령방", "user_key": "iris:1"},
+    )
+    assert duplicate.json()["id"] == recipient_id
+    assert len(store.raffle_recipient_history("수령방")) == 1
+
+    wrong_password = client.get(
+        f"/r/{token}/raffle-recipients",
+        params={"query": "박화", "password": "wrong"},
+    )
+    assert wrong_password.status_code == 403
+
+    site_registered = client.post(
+        f"/r/{token}/raffle-recipient",
+        json={"user_key": "iris:2", "room_password": "room-secret"},
+    )
+    assert site_registered.status_code == 200
+    assert site_registered.json()["nickname"] == "박화진"
+
+    removed = client.delete(
+        "/admin/raffle-recipient",
+        headers=auth,
+        params={"room": "수령방", "recipient_id": recipient_id},
+    )
+    assert removed.status_code == 200
+    assert "iris:1" in {
+        user_key
+        for user_key, _nickname, _count in store.raffle_candidates(
+            "수령방", today, excluded_after=cutoff
+        )
+    }
+
+    site_page = client.get(f"/r/{token}")
+    assert "추첨 상품 수령자" in site_page.text
+    owner_page = client.get("/admin")
+    assert "추첨 상품 수령자" in owner_page.text
+
+
 def test_migrate_room_moves_and_merges_data(tmp_path) -> None:
     from app.admin_store import ChatUser
 
@@ -213,11 +632,21 @@ def test_migrate_room_moves_and_merges_data(tmp_path) -> None:
     store.check_in(ChatUser(room=old, sender="지우", user_key="hash:ash"), "2026-07-10", 5)
     store.check_in(ChatUser(room=old, sender="웅이", user_key="hash:brock"), "2026-07-10", 5)
     store.check_in(ChatUser(room=new, sender="지우", user_key="hash:ash"), "2026-07-12", 5)
+    store.set_join_alert_threshold(old, 9)
+    store.set_shop_registration_admin_only(old, False)
+    store.set_shop_registration_costs(old, 250, 800)
 
     moved = store.migrate_room(old, new)
 
     assert moved["custom_commands"] == 1  # '규칙'만 이동 ('공지'는 새쪽 유지)
     assert moved["room_admins"] == 1
+    assert moved["room_settings"] == 1
+    assert store.get_join_alert_threshold(new) == 9
+    assert store.get_join_alert_threshold(old) == 5
+    assert not store.is_shop_registration_admin_only(new)
+    assert store.is_shop_registration_admin_only(old)
+    assert store.get_shop_registration_costs(new) == (250, 800)
+    assert store.get_shop_registration_costs(old) == (100, 0)
     assert store.get_custom_command(new, "공지").response == "새 공지"
     assert store.get_custom_command(new, "규칙").response == "규칙 내용"
     assert store.get_custom_command(old, "규칙") is None
@@ -255,6 +684,10 @@ def test_room_registry_token_survives_rename(tmp_path) -> None:
     # 다른 방은 다른 토큰을 받는다.
     other = store.touch_room("CHAT-B", "다른방")
     assert other["token"] != token
+    store.upsert_custom_command("다른방", "공지", "다른 방 공지", "다른방장")
+    assert store.get_room_name_by_token(other["token"]) == "다른방"
+    assert store.get_custom_command("바뀐이름방", "공지").response == "안녕"
+    assert store.get_custom_command("다른방", "공지").response == "다른 방 공지"
 
 
 def test_site_link_never_leaks_in_group_room(tmp_path) -> None:
@@ -309,30 +742,38 @@ def test_site_link_shown_only_in_owner_dm(tmp_path) -> None:
 
 @pytest.mark.anyio
 async def test_member_join_counting_is_per_room(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
     store = AdminStore(tmp_path / "test.sqlite3")
     bot = PokemonGoBot(admin_store=store)
+    admin = ChatUser(room="A방", sender="관리자", user_key="iris:x")
+    store.add_admin(admin)
+    store.add_admin(ChatUser(room="B방", sender="관리자", user_key="iris:x"))
 
-    # 처음 입장은 조용하다.
-    first = bot.handle_member_joins("A방", [("u1", "들낙이")])
-    assert first == ""
-    # 같은 방 두 번째 입장은 의심 문구.
-    second = bot.handle_member_joins("A방", [("u1", "들낙이")])
-    assert "들낙 유저 의심" in second
-    assert "입장 2회차" in second
+    # 기본 설정은 5회라 4회까지 조용하고 5회부터 안내한다.
+    for _ in range(4):
+        assert bot.handle_member_joins("A방", [("u1", "들낙이")]) == ""
+    fifth = bot.handle_member_joins("A방", [("u1", "들낙이")])
+    assert "들낙 유저 의심" in fifth
+    assert "입장 5회차" in fifth
 
     # 다른 방 카운트와 섞이지 않는다.
     other = bot.handle_member_joins("B방", [("u1", "들낙이")])
     assert other == ""
 
-    # /들낙 랭킹은 그 방 기준.
+    # 일반 사용자는 /들낙을 조회할 수 없다.
+    denied = await bot.handle("/들낙", room="A방", sender="일반", user_key="iris:no")
+    assert denied.reply == "이 명령어는 해당 방의 owner 또는 admin만 사용할 수 있습니다."
+
+    # 관리자의 /들낙 랭킹은 그 방 기준이고 조회 내용은 그대로다.
     ranking = await bot.handle("/들낙", room="A방", sender="관리자", user_key="iris:x")
-    assert "들낙이" in ranking.reply and "2회" in ranking.reply
+    assert "들낙이" in ranking.reply and "5회" in ranking.reply
     empty_b = await bot.handle("/들낙", room="B방", sender="관리자", user_key="iris:x")
     assert "없어요" in empty_b.reply and "들낙이" not in empty_b.reply
 
     # /들낙 닉네임은 특정 사람 조회.
     named = await bot.handle("/들낙 들낙이", room="A방", sender="관리자", user_key="iris:x")
-    assert "들낙이" in named.reply and "2회차" in named.reply
+    assert "들낙이" in named.reply and "5회차" in named.reply
 
     # 내보내면(퇴장·강퇴) 현재 인원에서 빠져 명단에 안 나온다.
     bot.handle_member_leaves("A방", [("u1", "들낙이")])
@@ -342,13 +783,23 @@ async def test_member_join_counting_is_per_room(tmp_path) -> None:
     # 다시 들어오면 카운트를 이어받아 다시 명단에 뜬다.
     bot.handle_member_joins("A방", [("u1", "들낙이")])
     rejoined = await bot.handle("/들낙", room="A방", sender="관리자", user_key="iris:x")
-    assert "들낙이" in rejoined.reply and "3회" in rejoined.reply
+    assert "들낙이" in rejoined.reply and "6회" in rejoined.reply
+
+    # 방마다 기준을 다르게 저장할 수 있다.
+    store.set_join_alert_threshold("B방", 3)
+    assert bot.handle_member_joins("B방", [("u1", "들낙이")]) == ""
+    third = bot.handle_member_joins("B방", [("u1", "들낙이")])
+    assert "입장 3회차" in third
 
 
 @pytest.mark.anyio
 async def test_kicked_member_rejoin_is_not_counted(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
     store = AdminStore(tmp_path / "test.sqlite3")
     bot = PokemonGoBot(admin_store=store)
+    store.set_join_alert_threshold("방", 2)
+    store.add_admin(ChatUser(room="방", sender="관리자", user_key="iris:y"))
 
     # 정상 입장 1회.
     assert bot.handle_member_joins("방", [("k1", "내풀이")]) == ""
@@ -370,8 +821,12 @@ async def test_kicked_member_rejoin_is_not_counted(tmp_path) -> None:
 
 @pytest.mark.anyio
 async def test_existing_member_rejoin_becomes_second_entry(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
     store = AdminStore(tmp_path / "test.sqlite3")
     bot = PokemonGoBot(admin_store=store)
+    store.set_join_alert_threshold("방", 2)
+    store.add_admin(ChatUser(room="방", sender="관리자", user_key="iris:z"))
 
     # 추적 시작 전부터 있던 사람이 채팅을 하면 '입장 1회'로 기준이 잡힌다.
     store.seed_member_present("방", "old1", "터줏대감")
@@ -513,6 +968,67 @@ def test_parse_warning_commands() -> None:
     assert parse_command("/경고추가 홍길동 도배") == ("warn_add", "홍길동 도배")
     assert parse_command("/경고") == ("warn_list", "")
     assert parse_command("/경고삭제 홍길동") == ("warn_remove", "홍길동")
+    assert parse_command("/관리자명령어") == ("admin_help", "")
+
+
+@pytest.mark.anyio
+async def test_admin_command_guide_is_for_admin_role_only(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    store.add_owner(
+        ChatUser(room="개인톡:owner", sender="오너", user_key="iris:owner")
+    )
+    store.add_admin(
+        ChatUser(room="레이드방", sender="부방장", user_key="iris:admin")
+    )
+
+    admin = await bot.handle(
+        "/관리자명령어",
+        room="레이드방",
+        sender="부방장",
+        user_key="iris:admin",
+    )
+    owner = await bot.handle(
+        "/관리자명령어",
+        room="레이드방",
+        sender="오너",
+        user_key="iris:owner",
+    )
+    member = await bot.handle(
+        "/관리자명령어",
+        room="레이드방",
+        sender="일반",
+        user_key="iris:member",
+    )
+
+    assert "【 관리자 명령어 】" in admin.reply
+    for command in (
+        "/경고추가",
+        "/들낙",
+        "/상품삭제",
+        "/레이드초기화",
+        "/명령어등록",
+    ):
+        assert command in admin.reply
+    for owner_command in (
+        "/오너등록",
+        "/관리자추가",
+        "/관리자승인",
+        "/경고권한부여",
+    ):
+        assert owner_command not in admin.reply
+    assert owner.reply == "이 명령어는 해당 방의 admin만 사용할 수 있습니다."
+    assert member.reply == "이 명령어는 해당 방의 admin만 사용할 수 있습니다."
+
+    command_list = await bot.handle(
+        "/명령어목록",
+        room="레이드방",
+        sender="부방장",
+        user_key="iris:admin",
+    )
+    assert "/관리자명령어" in command_list.reply
 
 
 @pytest.mark.anyio
@@ -539,6 +1055,46 @@ async def test_warning_tracks_by_id_across_nickname_change(tmp_path) -> None:
     # 권한 없는 사용자는 경고를 못 넣는다.
     denied = await bot.handle("/경고추가 홍길동 사유", room="방", sender="행인", user_key="iris:rando")
     assert "경고 권한" in denied.reply
+
+
+@pytest.mark.anyio
+async def test_room_admin_automatically_gets_warning_and_join_lookup_permissions(
+    tmp_path,
+) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    manager = ChatUser(room="관리방", sender="부방장", user_key="iris:manager")
+    store.add_admin(manager)
+    store.record_chat_message("관리방", "iris:target", "대상자", "2026-08-18")
+    for _ in range(2):
+        bot.handle_member_joins("관리방", [("target", "대상자")])
+
+    assert not store.has_warn_permission("관리방", manager.user_key)
+
+    added = await bot.handle(
+        "/경고추가 대상자 도배", room="관리방", sender="부방장", user_key=manager.user_key
+    )
+    warnings = await bot.handle(
+        "/경고", room="관리방", sender="부방장", user_key=manager.user_key
+    )
+    joins = await bot.handle(
+        "/들낙", room="관리방", sender="부방장", user_key=manager.user_key
+    )
+
+    assert "경고 등록" in added.reply
+    assert "대상자" in warnings.reply and "도배" in warnings.reply
+    assert "대상자" in joins.reply and "2회" in joins.reply
+
+    denied_warning = await bot.handle(
+        "/경고", room="다른방", sender="부방장", user_key=manager.user_key
+    )
+    denied_joins = await bot.handle(
+        "/들낙", room="다른방", sender="부방장", user_key=manager.user_key
+    )
+    assert "경고 권한" in denied_warning.reply
+    assert "owner 또는 admin" in denied_joins.reply
 
 
 @pytest.mark.anyio
@@ -569,6 +1125,16 @@ async def test_chat_earns_points_shared_with_attendance(tmp_path) -> None:
     mine = await bot.handle("/포인트", room="방", sender="지우", user_key="iris:ash")
     assert "8P" in mine.reply
 
+    # 같은 사용자가 다른 방에서 활동해도 포인트와 출석은 별도 지갑이다.
+    bot.record_chat("다른방", "지우", "iris:ash", "반가워요")
+    assert store.get_points("다른방", "iris:ash") == 1
+    assert store.get_points("방", "iris:ash") == 8
+    other_room = await bot.handle(
+        "/포인트", room="다른방", sender="지우", user_key="iris:ash"
+    )
+    assert "1P" in other_room.reply
+    assert store.attendance_ranking("다른방") == [("지우", 0, 1)]
+
 
 @pytest.mark.anyio
 async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
@@ -586,10 +1152,25 @@ async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
     second = await bot.handle("/상품등록 레이드 초대권 100", **owner)
     assert "2번" in second.reply
 
-    # 상품 관리는 누구나 할 수 있다(관리자 설정 없이 쓰려고 열어둠).
+    # 상품도 방별로 분리되어 다른 방 상점에는 나타나지 않는다.
+    other_room = await bot.handle(
+        "/상품", room="다른방", sender="지우", user_key="iris:ash"
+    )
+    assert "등록된 상품이 없어요" in other_room.reply
+
+    # 기본값은 owner/admin 전용이며, 방 설정으로 일반 사용자 등록을 열 수 있다.
+    denied_add = await bot.handle("/상품등록 임시상품 10", **buyer)
+    assert denied_add.reply == (
+        "상품 등록은 해당 방의 owner 또는 admin만 사용할 수 있습니다.\n"
+        "상품 등록이 필요하면 방 관리자에게 문의해 주세요."
+    )
+    store.set_shop_registration_admin_only("방", False)
+    store.set_shop_registration_costs("방", 0, 0)
     by_member = await bot.handle("/상품등록 임시상품 10", **buyer)
     assert "3번" in by_member.reply
-    assert "뺐어요" in (await bot.handle("/상품삭제 3", **buyer)).reply
+    denied_remove = await bot.handle("/상품삭제 3", **buyer)
+    assert denied_remove.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+    assert "뺐어요" in (await bot.handle("/상품삭제 3", **owner)).reply
 
     # 포인트가 모자라면 안내만 하고 차감하지 않는다.
     store.add_points("방", "iris:ash", "지우", 60)
@@ -624,11 +1205,13 @@ async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
     # 상품이 팔려 사라진 뒤에도 등록자는 남고, 닉을 바꾸면 최신 닉으로 나온다.
     assert "상품 등록자 : 새오너닉" in history.reply
 
-    # 전달 완료하면 그 건만 지운다.
-    cleared = await bot.handle("/구매내역삭제 1", **buyer)
+    # 구매내역 정리도 owner/admin만 할 수 있다.
+    denied_clear = await bot.handle("/구매내역삭제 1", **buyer)
+    assert denied_clear.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+    cleared = await bot.handle("/구매내역삭제 1", **owner)
     assert "전달 완료" in cleared.reply and "레이드 초대권" in cleared.reply
     assert "구매 내역이 없어요" in (await bot.handle("/구매내역", **buyer)).reply
-    assert "없어요" in (await bot.handle("/구매내역삭제 1", **buyer)).reply
+    assert "없어요" in (await bot.handle("/구매내역삭제 1", **owner)).reply
 
     # 먼저 산 것이 1번으로 위에 오고, 번호는 1부터 이어진다.
     store.record_purchase("방", "iris:ash", "지우", "먼저산것", 10)
@@ -638,24 +1221,175 @@ async def test_shop_purchase_and_insufficient_points(tmp_path) -> None:
     assert listing.reply.index("먼저산것") < listing.reply.index("나중산것")
 
     # 화면 번호로 지우면 그 줄이 지워지고 남은 건 번호가 당겨진다.
-    picked = await bot.handle("/구매내역삭제 1", **buyer)
+    picked = await bot.handle("/구매내역삭제 1", **owner)
     assert "먼저산것" in picked.reply
     after = await bot.handle("/구매내역", **buyer)
     assert "1. " in after.reply and "나중산것" in after.reply
 
     # 전체 삭제도 된다.
     store.record_purchase("방", "iris:ash", "지우", "간식", 10)
-    assert "2건을 모두 지웠어요" in (await bot.handle("/구매내역삭제 전체", **buyer)).reply
+    assert "2건을 모두 지웠어요" in (await bot.handle("/구매내역삭제 전체", **owner)).reply
 
     # 없는 번호는 막는다.
     assert "없어요" in (await bot.handle("/구매 99", **buyer)).reply
 
 
 @pytest.mark.anyio
+async def test_shop_registration_can_override_registrant_nickname(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    store.add_owner(ChatUser(room="개인톡:o", sender="오너", user_key="iris:owner"))
+    owner = {"room": "방", "sender": "관리자", "user_key": "iris:owner"}
+
+    own_item = await bot.handle("/상품등록 관리자 상품 100", **owner)
+    assert "등록자 : 관리자" in own_item.reply
+    assert store.get_shop_item("방", 1) == ("관리자 상품", 100, "iris:owner", "관리자")
+
+    store.record_chat_message("방", "iris:donor", "나눔 왕", "2026-08-14")
+    named_item = await bot.handle(
+        "/상품등록 리모트패스 3장 500 나눔 왕", **owner
+    )
+    assert "2번 · 리모트패스 3장 · 500P" in named_item.reply
+    assert "등록자 : 나눔 왕" in named_item.reply
+    assert store.get_shop_item("방", 2) == (
+        "리모트패스 3장",
+        500,
+        "iris:donor",
+        "나눔 왕",
+    )
+
+    unknown_item = await bot.handle(
+        "/상품등록 특별 선물 250 익명 기부자", **owner
+    )
+    assert "등록자 : 익명 기부자" in unknown_item.reply
+    assert store.get_shop_item("방", 3) == (
+        "특별 선물",
+        250,
+        "",
+        "익명 기부자",
+    )
+
+    listing = await bot.handle("/상품", room="방", sender="구매자", user_key="iris:buyer")
+    assert "상품 등록자 : 관리자" in listing.reply
+    assert "상품 등록자 : 나눔 왕" in listing.reply
+    assert "상품 등록자 : 익명 기부자" in listing.reply
+
+
+@pytest.mark.anyio
+async def test_shop_guides_are_split_by_permission(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    store.add_owner(ChatUser(room="개인톡:o", sender="오너", user_key="iris:owner"))
+
+    denied = await bot.handle("/상품기능가이드", room="방", sender="일반 사용자")
+    assert denied.reply == "이 명령어는 해당 방의 owner 또는 admin만 사용할 수 있습니다."
+
+    guide = await bot.handle(
+        "/상품기능가이드", room="방", sender="오너", user_key="iris:owner"
+    )
+    assert "【 포인트 상점 기능 가이드 】" in guide.reply
+    assert "/상품등록 상품명 포인트 닉네임" in guide.reply
+    assert "/구매내역삭제 전체" in guide.reply
+
+    public_commands = await bot.handle(
+        "/상품명령어", room="방", sender="일반 사용자"
+    )
+    assert "【 포인트 상점 명령어 】" in public_commands.reply
+    assert "/상품" in public_commands.reply
+    assert "/구매 상품번호" in public_commands.reply
+    assert "/구매내역" in public_commands.reply
+    assert "/상품등록" not in public_commands.reply
+    assert "/상품삭제" not in public_commands.reply
+    assert "/구매내역삭제" not in public_commands.reply
+
+    assert "상품기능가이드" in PokemonGoBot._reserved_custom_commands()
+    assert "상품명령어" in PokemonGoBot._reserved_custom_commands()
+
+    help_reply = await bot.handle("/도움말", room="방", sender="일반 사용자")
+    command_reply = await bot.handle("/명령어", room="방", sender="일반 사용자")
+    assert "/상품명령어" in help_reply.reply
+    assert "/상품명령어" in command_reply.reply
+    assert "/상품기능가이드" not in help_reply.reply
+    assert "/상품기능가이드" not in command_reply.reply
+
+    store.set_shop_registration_admin_only("방", False)
+    store.set_shop_registration_costs("방", 100, 500)
+    public_with_registration = await bot.handle(
+        "/상품명령어", room="방", sender="일반 사용자"
+    )
+    assert "/상품등록 상품명 포인트" in public_with_registration.reply
+    assert "등록 수수료 : 100P" in public_with_registration.reply
+    assert "보증금 : 500P" in public_with_registration.reply
+    assert "총 600P" in public_with_registration.reply
+
+
+@pytest.mark.anyio
+async def test_public_shop_registration_charges_fee_and_refunds_deposit(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    store.set_shop_registration_admin_only("방", False)
+    seller = {"room": "방", "sender": "판매자", "user_key": "iris:seller"}
+    buyer = {"room": "방", "sender": "구매자", "user_key": "iris:buyer"}
+
+    # 일반 사용자 등록을 열면 기본 수수료 100P, 보증금 0P가 적용된다.
+    assert store.get_shop_registration_costs("방") == (100, 0)
+    store.add_points("방", "iris:seller", "판매자", 99)
+    insufficient = await bot.handle("/상품등록 기본상품 300", **seller)
+    assert "필요 포인트 : 100P" in insufficient.reply
+    assert store.list_shop_items("방") == []
+    assert store.get_points("방", "iris:seller") == 99
+
+    store.add_points("방", "iris:seller", "판매자", 1)
+    charged_fee = await bot.handle("/상품등록 기본상품 300", **seller)
+    assert "차감 : 100P (수수료 100P + 보증금 0P)" in charged_fee.reply
+    assert store.get_points("방", "iris:seller") == 0
+
+    store.add_points("방", "iris:buyer", "구매자", 300)
+    await bot.handle("/구매 1", **buyer)
+    assert store.get_points("방", "iris:seller") == 0  # 수수료는 반환되지 않는다.
+
+    # 수수료 100P + 보증금 500P면 등록 시 600P가 빠지고 판매 시 500P만 돌아온다.
+    store.set_shop_registration_costs("방", 100, 500)
+    store.add_points("방", "iris:seller", "판매자", 600)
+    charged_deposit = await bot.handle("/상품등록 보증상품 200", **seller)
+    assert "차감 : 600P (수수료 100P + 보증금 500P)" in charged_deposit.reply
+    assert "보증금 500P는 상품이 판매되면 반환됩니다" in charged_deposit.reply
+    assert store.get_points("방", "iris:seller") == 0
+
+    store.add_points("방", "iris:buyer", "구매자", 200)
+    bought = await bot.handle("/구매 1", **buyer)
+    assert "판매자 님에게 보증금 500P 반환" in bought.reply
+    assert store.get_points("방", "iris:seller") == 500
+
+    # 일반 사용자는 다른 사람을 등록자로 지정할 수 없다.
+    store.add_points("방", "iris:seller", "판매자", 600)
+    impersonation = await bot.handle("/상품등록 다른상품 100 다른사람", **seller)
+    assert "등록자 닉네임을 따로 지정할 수 없습니다" in impersonation.reply
+    assert store.get_points("방", "iris:seller") == 1100
+
+    # owner/admin이 직접 등록할 때는 수수료와 보증금이 차감되지 않는다.
+    store.add_owner(ChatUser(room="개인톡:o", sender="오너", user_key="iris:owner"))
+    manager = {"room": "방", "sender": "오너", "user_key": "iris:owner"}
+    manager_item = await bot.handle("/상품등록 관리자상품 100 지정등록자", **manager)
+    assert "등록자 : 지정등록자" in manager_item.reply
+    assert "차감" not in manager_item.reply
+    assert store.get_points("방", "iris:owner") == 0
+
+
+@pytest.mark.anyio
 async def test_shop_renumbers_after_delete(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
     store = AdminStore(tmp_path / "test.sqlite3")
     bot = PokemonGoBot(admin_store=store)
     who = {"room": "방", "sender": "링딩", "user_key": "iris:a"}
+    store.add_admin(ChatUser(room="방", sender="링딩", user_key="iris:a"))
 
     for name in ("상품하나", "상품둘", "상품셋"):
         await bot.handle(f"/상품등록 {name} 10", **who)
@@ -684,6 +1418,26 @@ async def test_shop_renumbers_after_delete(tmp_path) -> None:
     # 마지막 하나만 남기고 지워도 번호가 어긋나지 않는다.
     await bot.handle("/상품삭제 1", **who)
     assert [(no, name) for no, name, *_ in store.list_shop_items("방")] == [(1, "상품넷")]
+
+
+@pytest.mark.anyio
+async def test_shop_delete_permission_is_room_scoped(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    admin = {"sender": "부방장", "user_key": "iris:sub"}
+    store.add_admin(ChatUser(room="A방", **admin))
+
+    await bot.handle("/상품등록 A상품 10", room="A방", **admin)
+    store.add_shop_item("B방", "B상품", 10, "iris:shop", "등록자")
+
+    allowed = await bot.handle("/상품삭제 1", room="A방", **admin)
+    denied = await bot.handle("/상품삭제 1", room="B방", **admin)
+
+    assert "뺐어요" in allowed.reply
+    assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
+    assert [item[1] for item in store.list_shop_items("B방")] == ["B상품"]
 
 
 @pytest.mark.anyio
@@ -810,6 +1564,27 @@ async def test_warning_add_needs_known_nickname(tmp_path) -> None:
 
 
 @pytest.mark.anyio
+async def test_record_add_supports_space_nickname_with_reason_separator(tmp_path) -> None:
+    from app.admin_store import ChatUser
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store)
+    store.add_owner(ChatUser(room="개인톡:o", sender="오너", user_key="iris:owner"))
+    store.record_chat_message("방", "iris:space", "아 아", "2026-08-11")
+    owner = {"room": "방", "sender": "오너", "user_key": "iris:owner"}
+
+    warned = await bot.handle("/경고추가 아 아 사유 들낙", **owner)
+    praised = await bot.handle("/칭찬추가 아 아 사유 레이드 도움", **owner)
+
+    assert "경고 등록: 아 아" in warned.reply
+    assert "사유: 들낙" in warned.reply
+    assert "칭찬 등록: 아 아" in praised.reply
+    assert "내용: 레이드 도움" in praised.reply
+    assert store.warning_reasons("방", "iris:space", kind="warn") == ["들낙"]
+    assert store.warning_reasons("방", "iris:space", kind="praise") == ["레이드 도움"]
+
+
+@pytest.mark.anyio
 async def test_warn_remove_single_reason_or_all(tmp_path) -> None:
     from app.admin_store import ChatUser
 
@@ -872,6 +1647,7 @@ async def test_warn_permission_grant_multiple_at_once(tmp_path) -> None:
 async def test_leave_baselines_untracked_member(tmp_path) -> None:
     store = AdminStore(tmp_path / "test.sqlite3")
     bot = PokemonGoBot(admin_store=store)
+    store.set_join_alert_threshold("방", 2)
 
     # 채팅 한 번 없던 잠수 유저라도 스스로 나가면(퇴장 피드) 입장 1회로 잡힌다.
     bot.handle_member_leaves("방", [("ghost", "유령")])
@@ -942,25 +1718,26 @@ async def test_league_ranking_falls_back_to_base_when_offline(tmp_path) -> None:
 
 
 @pytest.mark.anyio
-async def test_base_room_commands_are_shared_everywhere(tmp_path) -> None:
+async def test_custom_commands_do_not_leak_between_rooms(tmp_path) -> None:
     from app.bot import BASE_ROOM
 
     store = AdminStore(tmp_path / "test.sqlite3")
-    store.upsert_custom_command(BASE_ROOM, "세꿀", "공용 세꿀 안내", "시스템")
+    store.upsert_custom_command("A방", "공지", "A방 공지", "A방장")
+    store.upsert_custom_command("B방", "공지", "B방 공지", "B방장")
+    store.upsert_custom_command(BASE_ROOM, "세꿀", "시스템 내부 백업", "시스템")
     bot = PokemonGoBot(admin_store=store)
 
-    # 아무 방에서나 공용 기본 명령어가 나온다.
-    shared = await bot.handle("/세꿀", room="처음보는방", sender="유저", user_key="iris:1")
-    assert shared.reply == "공용 세꿀 안내"
+    assert (await bot.handle("/공지", room="A방", sender="유저", user_key="iris:1")).reply == "A방 공지"
+    assert (await bot.handle("/공지", room="B방", sender="유저", user_key="iris:1")).reply == "B방 공지"
 
-    # 방이 같은 이름으로 자기 것을 등록하면 그 방에선 방 것이 우선한다.
-    store.upsert_custom_command("처음보는방", "세꿀", "우리 방 전용", "방장")
-    overridden = await bot.handle("/세꿀", room="처음보는방", sender="유저", user_key="iris:1")
-    assert overridden.reply == "우리 방 전용"
+    missing = await bot.handle("/공지", room="C방", sender="유저", user_key="iris:1")
+    assert missing.silent is True
+    assert missing.reply == ""
 
-    # 공용에도 없는 명령어는 조용히 무시된다.
-    unknown = await bot.handle("/없는거", room="처음보는방", sender="유저", user_key="iris:1")
-    assert unknown.silent is True
+    # 시스템 백업 공간에 있는 임의 명령어도 일반 방으로 새어 나오지 않는다.
+    internal = await bot.handle("/세꿀", room="A방", sender="유저", user_key="iris:1")
+    assert internal.silent is True
+    assert internal.reply == ""
 
 
 def test_admin_web_rename_room(tmp_path, monkeypatch) -> None:
@@ -1528,6 +2305,84 @@ async def test_raffle_draws_from_active_members_only(tmp_path) -> None:
     assert "오늘 활동자 2명" in result.reply
 
 
+@pytest.mark.anyio
+async def test_raffle_temporarily_ignores_countdown_fragments(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
+
+    await bot.handle("/추첨", room="추첨방", sender="진행자", user_key="iris:host")
+    for message in ("5", "4", "3", "2", "1"):
+        assert bot.record_chat("추첨방", "진행자", "iris:host", message) == ""
+
+    assert store.list_moderation_incidents("추첨방") == []
+
+
+@pytest.mark.anyio
+async def test_raffle_excludes_registered_recipients_and_resets_when_exhausted(
+    tmp_path, monkeypatch
+) -> None:
+    from datetime import date, timedelta
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
+    today = date.today()
+    today_text = today.isoformat()
+
+    for user_key, nickname in (
+        ("iris:1", "첫째"),
+        ("iris:2", "둘째"),
+        ("iris:3", "셋째"),
+    ):
+        bot.record_chat("추첨방", nickname, user_key)
+
+    store.record_raffle_winner("추첨방", "iris:1", "옛첫째닉", today_text)
+    store.record_raffle_winner(
+        "추첨방", "iris:2", "둘째", (today - timedelta(days=3)).isoformat()
+    )
+    # 다른 방 당첨 기록은 이 방 추첨에 영향을 주지 않는다.
+    store.record_raffle_winner("다른방", "iris:3", "셋째", today_text)
+
+    cutoff = (today - timedelta(days=7)).isoformat()
+    eligible = store.raffle_candidates(
+        "추첨방", today_text, excluded_after=cutoff
+    )
+    assert eligible == [("iris:3", "셋째", 1)]
+
+    monkeypatch.setattr(
+        "app.bot.random.choices",
+        lambda population, weights, k: [population[0]],
+    )
+    first = await bot.handle("/추첨", room="추첨방", sender="진행자")
+    assert "당첨 : 셋째 님" in first.reply
+    assert "추첨 대상 1명" in first.reply
+    assert "전체 활동자로 다시" not in first.reply
+    assert "관리 사이트에서 수령자로 등록" in first.reply
+    # 추첨만으로는 제외 기록이 생기지 않는다. 실제 상품 수령을 등록해야 한다.
+    assert store.raffle_winner_history("추첨방", limit=1)[0][0] == "iris:2"
+    store.register_raffle_recipient("추첨방", "iris:3", "셋째", today_text)
+
+    # 세 활동자가 모두 최근 수령 등록자가 됐으므로 제한을 풀고 전체에서 추첨한다.
+    reset = await bot.handle("/추첨", room="추첨방", sender="진행자")
+    assert "전체 활동자로 다시 추첨했습니다" in reset.reply
+    assert "오늘 활동자 3명 / 추첨 대상 3명" in reset.reply
+
+
+def test_raffle_cooldown_ends_after_seven_days(tmp_path) -> None:
+    from datetime import date, timedelta
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    today = date.today()
+    today_text = today.isoformat()
+    cutoff = (today - timedelta(days=7)).isoformat()
+    store.record_chat_message("방", "iris:old", "지난당첨자", today_text)
+    store.record_raffle_winner("방", "iris:old", "지난당첨자", cutoff)
+
+    # 정확히 7일 전 수령 등록자는 오늘부터 다시 후보가 된다.
+    assert store.raffle_candidates("방", today_text, excluded_after=cutoff) == [
+        ("iris:old", "지난당첨자", 1)
+    ]
+
+
 def test_iris_skips_bot_own_messages(tmp_path, monkeypatch) -> None:
     import app.main as main_module
 
@@ -1590,10 +2445,40 @@ async def test_attendance_ranking_shows_top_ten(tmp_path) -> None:
     assert lines[3] == "🥉 유저09 - 10일 / 50P"
     assert lines[4] == "4. 유저08 - 9일 / 45P"
     assert "유저00" not in ranking.reply
-    assert "유저01" not in ranking.reply
 
     other_room = await bot.handle("/출석랭킹", room="다른방", sender="지우")
     assert "아직 출석한 사람이 없어요" in other_room.reply
+
+
+@pytest.mark.anyio
+async def test_point_ranking_shows_room_top_twenty(tmp_path) -> None:
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
+
+    empty = await bot.handle("/포인트순위", room="레이드방", sender="지우")
+    assert "포인트를 보유한 사람이 없어요" in empty.reply
+
+    for index in range(22):
+        store.add_points(
+            "레이드방",
+            f"hash:user{index:02d}",
+            f"유저{index:02d}",
+            (index + 1) * 10,
+        )
+    store.add_points("다른방", "hash:outsider", "다른방1등", 9999)
+
+    ranking = await bot.handle("/포인트순위", room="레이드방", sender="지우")
+    lines = ranking.reply.split("\n")
+
+    assert lines[0] == "💰 포인트 순위 TOP 20"
+    assert len(lines) == 22  # 제목과 구분선 + 20명
+    assert lines[2] == "🥇 유저21 - 220P"
+    assert lines[3] == "🥈 유저20 - 210P"
+    assert lines[4] == "🥉 유저19 - 200P"
+    assert lines[5] == "4. 유저18 - 190P"
+    assert "유저01" not in ranking.reply
+    assert "유저00" not in ranking.reply
+    assert "다른방1등" not in ranking.reply
 
 
 @pytest.mark.anyio
@@ -1731,10 +2616,17 @@ async def test_custom_commands_are_managed_by_admins(tmp_path) -> None:
     assert "/명령어등록 공지 내용" in owner_listed.reply
     assert "/명령어추가 공지 내용" in owner_listed.reply
     assert "/관리자승인 번호" in owner_listed.reply
+    assert "/들낙 [닉네임]" in owner_listed.reply
 
     owner_help = await bot.handle("/도움말", room="레이드방", sender="오너")
     assert "/공지" in owner_help.reply
     assert "/도감 포켓몬이름" in owner_help.reply
+    assert "/부스트 [지역]" in owner_help.reply
+    assert "/포인트" in owner_help.reply
+    assert "/포인트순위" in owner_help.reply
+    assert "/상품" in owner_help.reply
+    assert "/칭찬추가 닉네임 사유 내용" in owner_help.reply
+    assert "/들낙" not in owner_help.reply
     assert "【 가르치기 목록 】" in owner_help.reply
     assert "1. /공지" in owner_help.reply
     assert "└ 가르친사람 : 오너" in owner_help.reply
@@ -2362,13 +3254,16 @@ async def test_shared_admin_room_manages_target_room(tmp_path) -> None:
     )
     assert denied.reply == "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
 
-    # 관리방 자체에 등록된 명령어는 관리방에서 실행되고(대상방보다 우선),
-    # 대상방(종합방)에는 노출되지 않는다.
+    # 관리방 자체 명령어만 관리방에서 실행된다. 대상방 명령어는 원격으로
+    # 관리할 수 있어도 관리방에서 실행되거나 노출되지는 않는다.
     store.upsert_custom_command("관리방", "사이트", "관리 페이지 링크", "오너")
     own_room = await bot.handle("/사이트", room="관리방", sender="부방장", user_key="hash:sub")
     assert own_room.reply == "관리 페이지 링크"
-    fallback = await bot.handle("/공지", room="관리방", sender="부방장", user_key="hash:sub")
-    assert fallback.reply == "오늘 레이드 9시"  # 대상방 명령어는 여전히 동작
+    target_command = await bot.handle(
+        "/공지", room="관리방", sender="부방장", user_key="hash:sub"
+    )
+    assert target_command.silent is True
+    assert target_command.reply == ""
     hidden = await bot.handle("/사이트", room="종합방", sender="일반")
     assert hidden.silent is True
 

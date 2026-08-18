@@ -5,10 +5,16 @@ import os
 import random
 import unicodedata
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import NamedTuple
 
 from app.admin_store import AdminStore, ChatUser
+from app.chat_moderation import (
+    KoreanChatAnalyzer,
+    ModerationSettings,
+    preview_messages,
+)
+from app.moderation_learning import ModerationClassifier, ModerationLearningManager
 from app.counters import format_counter_reply
 from app.boost import format_boost
 from app.events import EventDataUnavailableError, PokemonGoEventClient
@@ -33,6 +39,8 @@ DATA_UNAVAILABLE_MESSAGE = (
 # 이 길이를 넘는 커스텀 명령어 응답은 카톡에서 제목만 보이고
 # 나머지는 '전체보기' 뒤로 접히게 만든다.
 FOLD_THRESHOLD = 400
+RAFFLE_COOLDOWN_DAYS = 7
+RAFFLE_FRAGMENT_SUPPRESSION_SECONDS = 15
 # 긴 메시지를 전체보기로 접는 카톡의 길이 기준을 넘기기 위한 패딩.
 # 폭 없는 공백(U+200B)을 첫 줄 뒤에 채워 넣으면 미리보기에는 첫 줄만 남는다.
 # 실측: 500자는 폰 전송과 접힘 모두 동작, 2000자는 폰이 전송하지 못한다.
@@ -99,9 +107,8 @@ HELP_GREETINGS = [
 OWNER_SETUP_CODE = os.getenv("OWNER_SETUP_CODE", "")
 # 저장소에 공개된 예시 값이므로 실제 등록 코드로 인정하지 않는다.
 INSECURE_SETUP_CODES = {"", "change-me"}
-# 모든 방이 공유하는 공용 기본 명령어가 담기는 가상의 방. 어떤 방에서
-# 명령을 쳐도 그 방과 대상방에 없으면 여기서 찾는다. 실제 카톡방 이름과
-# 겹치지 않도록 예약어 형태로 둔다.
+# PvPoke 장애 시 리그 순위를 대신 보여주기 위한 시스템 백업 공간이다.
+# 일반 커스텀 명령어 조회에는 사용하지 않으므로 방별 명령어가 섞이지 않는다.
 BASE_ROOM = "__공용__"
 # 경고와 칭찬은 저장·조회 방식이 같고 표시 문구와 권한만 다르다.
 class RecordKind(NamedTuple):
@@ -168,6 +175,11 @@ BUILTIN_HELP_ENTRIES = [
         "줄임말 : /전국날씨",
     ),
     (
+        "/부스트 [지역]",
+        "오늘 날씨에 부스트되는 포켓몬 타입을 확인합니다.\n"
+        "예시 : /부스트, /부스트 서울",
+    ),
+    (
         "/오늘의포켓몬",
         "오늘의 파트너 포켓몬과 운세를 뽑고 출석체크가 됩니다.\n"
         f"하루 1회, 출석마다 {DAILY_CHECK_IN_POINTS}포인트 적립!\n"
@@ -179,13 +191,43 @@ BUILTIN_HELP_ENTRIES = [
     ),
     (
         "/추첨",
-        "채팅 활동이 있는 사람 중 1명을 추첨합니다.\n"
-        "활동이 많을수록 당첨 확률이 높아요!",
+        "오늘 실제 채팅 활동이 있는 사람 중 1명을 추첨합니다.\n"
+        "최근 7일 상품 수령 등록자는 제외되며, 후보가 없으면 전체 활동자로 다시 추첨합니다.",
     ),
     (
         "/일일랭킹",
         "오늘 이 방에서 채팅을 많이 한 순위 TOP 10을 보여줍니다.\n"
         "누적 순위는 /랭킹",
+    ),
+    (
+        "/포인트",
+        "채팅, 출석, 일일랭킹으로 모은 내 포인트를 확인합니다.\n"
+        "채팅 1회 +1P, 출석 +5P, 일일랭킹 상위권은 추가 적립!",
+    ),
+    (
+        "/포인트순위",
+        "이 방의 보유 포인트 순위를 상위 20명까지 보여줍니다.",
+    ),
+    (
+        "/상품",
+        "이 방의 포인트 상점과 내 포인트를 확인합니다.\n"
+        "구매 : /구매 상품번호\n"
+        "등록(기본 owner/admin) : /상품등록 상품명 포인트\n"
+        "상품 등록 권한은 방 설정에 따라 달라집니다.\n"
+        "구매 내역 : /구매내역\n"
+        "일반 사용자 사용법 : /상품명령어",
+    ),
+    (
+        "/상품명령어",
+        "일반 사용자가 이용할 수 있는 상품 조회, 구매, 구매내역 명령어를 확인합니다.",
+    ),
+    (
+        "/칭찬추가 닉네임 사유 내용",
+        "방 멤버에게 칭찬을 남깁니다. 누구나 사용할 수 있어요.\n"
+        "공백 닉네임은 '사유'로 구분합니다.\n"
+        "예시 : /칭찬추가 아 아 사유 레이드 도움\n"
+        "목록 : /칭찬 닉네임\n"
+        "취소 : /칭찬삭제 닉네임 내용",
     ),
     (
         "/모집 포켓몬이름 모집자닉네임 친구코드",
@@ -202,6 +244,61 @@ BUILTIN_HELP_ENTRIES = [
         "자세한 안내 : /가이드",
     ),
 ]
+SHOP_USER_COMMANDS = (
+    "【 포인트 상점 명령어 】\n"
+    "━━━━━━━━━━━━━━━━\n"
+    "1. 상품 목록 확인\n"
+    "/상품\n"
+    "└ 상품명, 가격, 등록자와 내 포인트를 확인합니다.\n"
+    "\n"
+    "2. 상품 구매\n"
+    "/구매 상품번호\n"
+    "└ 예시 : /구매 1\n"
+    "\n"
+    "3. 구매 내역 확인\n"
+    "/구매내역\n"
+    "└ 구매자, 상품, 구매일과 등록자를 확인합니다.\n"
+    "\n"
+    "4. 내 포인트 확인\n"
+    "/포인트\n"
+    "└ 현재 보유한 포인트를 확인합니다."
+)
+SHOP_FEATURE_GUIDE = (
+    "【 포인트 상점 기능 가이드 】\n"
+    "━━━━━━━━━━━━━━━━\n"
+    "1. 상품 목록 확인\n"
+    "/상품\n"
+    "└ 등록된 상품, 등록자, 가격과 내 포인트를 확인합니다.\n"
+    "\n"
+    "2. 상품 등록 (기본 owner/admin)\n"
+    "/상품등록 상품명 포인트\n"
+    "└ 명령어를 입력한 관리자가 등록자로 표시됩니다.\n"
+    "└ 예시 : /상품등록 레이드 초대권 500\n"
+    "\n"
+    "/상품등록 상품명 포인트 닉네임\n"
+    "└ 포인트 뒤의 닉네임을 등록자로 표시합니다.\n"
+    "└ 예시 : /상품등록 전설몬 1마리 500 나눔왕\n"
+    "\n"
+    "3. 상품 구매\n"
+    "/구매 상품번호\n"
+    "└ 예시 : /구매 1\n"
+    "\n"
+    "4. 구매 내역 확인\n"
+    "/구매내역\n"
+    "└ 구매자, 상품, 구매일과 등록자를 확인합니다.\n"
+    "\n"
+    "5. 상품 및 구매 내역 정리 (owner/admin)\n"
+    "/상품삭제 상품번호\n"
+    "/구매내역삭제 번호\n"
+    "/구매내역삭제 전체\n"
+    "\n"
+    "※ 상품 등록은 기본적으로 owner/admin만 가능합니다.\n"
+    "※ 방 운영 설정에서 일반 사용자 등록을 허용할 수 있습니다.\n"
+    "※ 일반 사용자는 설정된 수수료와 보증금을 등록할 때 함께 냅니다.\n"
+    "※ 수수료는 반환되지 않고 보증금은 상품이 판매되면 등록자에게 반환됩니다.\n"
+    "※ owner/admin이 직접 등록할 때는 수수료와 보증금이 차감되지 않습니다.\n"
+    "※ 상품·구매 내역 삭제는 항상 owner/admin만 가능합니다."
+)
 RAID_PARTY_SIZE = 10
 RAID_GUIDE = (
     "🎫 레이드 초대 시스템 사용법\n"
@@ -246,8 +343,11 @@ RAID_APPLY_GUIDE = (
     "📖 자세한 사용법 → /레이드하는법"
 )
 ADMIN_COMMANDS = [
+    "/상품기능가이드",
+    "/들낙 [닉네임]",
     "/취소랭킹",
     "/레이드초기화 전체(또는 포켓몬이름 모집자)",
+    "/이벤트알림 켜기(또는 끄기)",
     "/대상방설정 공개방이름",
     "/대상방확인",
     "/명령어등록 공지 내용",
@@ -256,14 +356,59 @@ ADMIN_COMMANDS = [
     "/명령어이어쓰기 공지 추가내용",
     "/명령어삭제 공지",
 ]
+ADMIN_COMMAND_GUIDE = (
+    "【 관리자 명령어 】\n"
+    "━━━━━━━━━━━━━━━━\n"
+    "1. 경고 관리\n"
+    "/경고\n"
+    "└ 경고 명단을 확인합니다.\n"
+    "/경고추가 닉네임 사유\n"
+    "└ 예시 : /경고추가 홍길동 도배\n"
+    "/경고삭제 닉네임 [사유]\n"
+    "└ 사유를 생략하면 해당 사용자의 경고를 모두 삭제합니다.\n"
+    "\n"
+    "2. 들낙 조회\n"
+    "/들낙\n"
+    "└ 재입장 기록이 있는 사용자 목록을 확인합니다.\n"
+    "/들낙 닉네임\n"
+    "└ 특정 사용자의 입장 횟수를 확인합니다.\n"
+    "\n"
+    "3. 포인트 상점 관리\n"
+    "/상품기능가이드\n"
+    "/상품등록 상품명 포인트 [등록자닉네임]\n"
+    "/상품삭제 상품번호\n"
+    "/구매내역삭제 번호 또는 전체\n"
+    "\n"
+    "4. 레이드 관리\n"
+    "/취소랭킹\n"
+    "/레이드초기화 전체\n"
+    "/레이드초기화 포켓몬이름 모집자\n"
+    "\n"
+    "5. 방 기능 관리\n"
+    "/이벤트알림 켜기 또는 끄기\n"
+    "/대상방설정 공개방이름\n"
+    "/대상방확인\n"
+    "\n"
+    "6. 커스텀 명령어 관리\n"
+    "/명령어등록 명령어 답변\n"
+    "/명령어수정 명령어 새답변\n"
+    "/명령어이어쓰기 명령어 추가답변\n"
+    "/명령어삭제 명령어\n"
+    "\n"
+    "※ 이 안내는 해당 방의 admin만 확인할 수 있습니다."
+)
 OWNER_COMMANDS = [
     "/오너등록 코드",
+    "/관리링크 (개인톡에서 사용)",
     "/관리자추가 닉네임",
     "/관리자명단",
     "/관리자삭제 닉네임(또는 번호)",
     "/관리자요청목록",
     "/관리자승인 번호",
     "/관리자거절 번호",
+    "/경고권한부여 닉네임",
+    "/경고권한해제 닉네임",
+    "/경고권한목록",
 ]
 
 
@@ -321,8 +466,14 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "attendance_ranking", query
     if command in ("포인트", "내포인트", "point"):
         return "points", query
+    if command in ("포인트순위", "포인트랭킹"):
+        return "point_ranking", query
     if command in ("상품등록", "상품추가"):
         return "shop_add", query
+    if command in ("상품기능가이드", "상점가이드"):
+        return "shop_guide", ""
+    if command in ("상품명령어", "상점명령어"):
+        return "shop_commands", ""
     if command in ("상품삭제",):
         return "shop_remove", query
     if command in ("상품", "상점", "상품목록"):
@@ -381,6 +532,8 @@ def parse_command(text: str) -> tuple[str, str] | None:
         return "raid_clear", query
     if command in ("오너등록", "owner"):
         return "owner_setup", query
+    if command in ("관리자명령어", "관리자도움말"):
+        return "admin_help", ""
     if command in ("관리자요청",):
         return "admin_request", query
     if command in ("권한확인", "role"):
@@ -447,15 +600,27 @@ class PokemonGoBot:
         admin_store: AdminStore | None = None,
         owner_setup_code: str | None = None,
         pvp_client: PvpRankingClient | None = None,
+        chat_analyzer: KoreanChatAnalyzer | None = None,
     ) -> None:
         self.pogo_client = pogo_client or PogoApiClient()
         self.event_client = event_client or PokemonGoEventClient()
         self.pvp_client = pvp_client or PvpRankingClient()
         self.weather_client = weather_client or KoreaWeatherClient()
         self.admin_store = admin_store or AdminStore()
+        self.moderation_classifier = ModerationClassifier(self.admin_store)
+        self.moderation_learning = ModerationLearningManager(
+            self.admin_store, self.moderation_classifier
+        )
+        self.chat_analyzer = chat_analyzer or KoreanChatAnalyzer(
+            self.moderation_classifier
+        )
         self.owner_setup_code = (
             OWNER_SETUP_CODE if owner_setup_code is None else owner_setup_code
         )
+
+    def warm_up_chat_analyzer(self) -> bool:
+        """서버 시작 뒤 한국어 분석 모델을 미리 준비한다."""
+        return self.chat_analyzer.warm_up()
 
     async def handle(
         self,
@@ -481,13 +646,30 @@ class PokemonGoBot:
             return BotResponse(self._handle_attendance_ranking(user))
 
         if command == "join_stats":
+            if not self.admin_store.is_admin_or_owner(user):
+                return BotResponse(
+                    "이 명령어는 해당 방의 owner 또는 admin만 사용할 수 있습니다."
+                )
             return BotResponse(self._handle_join_stats(user, query))
 
         if command == "points":
             return BotResponse(self._handle_points(user))
 
+        if command == "point_ranking":
+            return BotResponse(self._handle_point_ranking(user))
+
         if command == "shop_add":
             return BotResponse(self._handle_shop_add(user, query, target_user.room))
+
+        if command == "shop_guide":
+            if not self._can_manage_room(user, target_user.room):
+                return BotResponse(
+                    "이 명령어는 해당 방의 owner 또는 admin만 사용할 수 있습니다."
+                )
+            return BotResponse(self._handle_shop_feature_guide(target_user.room))
+
+        if command == "shop_commands":
+            return BotResponse(self._handle_shop_user_commands(target_user.room))
 
         if command == "shop_remove":
             return BotResponse(self._handle_shop_remove(user, query, target_user.room))
@@ -502,7 +684,9 @@ class PokemonGoBot:
             return BotResponse(self._handle_shop_history(user))
 
         if command == "shop_history_clear":
-            return BotResponse(self._handle_shop_history_clear(user, query))
+            return BotResponse(
+                self._handle_shop_history_clear(user, query, target_user.room)
+            )
 
         if command in ("warn_add", "praise_add"):
             kind = "warn" if command == "warn_add" else "praise"
@@ -599,6 +783,9 @@ class PokemonGoBot:
         if command == "owner_setup":
             return BotResponse(self._handle_owner_setup(user, query))
 
+        if command == "admin_help":
+            return BotResponse(self._handle_admin_command_guide(user))
+
         if command == "admin_request":
             return BotResponse(self._handle_admin_request(user))
 
@@ -646,19 +833,9 @@ class PokemonGoBot:
 
         if command == "custom_run":
             normalized = self._normalize_custom_command(query)
-            # 명령을 친 방 자체에 등록된 것을 먼저 찾고, 없으면 관리
-            # 대상방의 것을 찾는다. 관리방 전용 명령어(/사이트 등)가
-            # 대상방 조회에 가려지지 않게 하기 위함이다.
+            # 커스텀 명령어는 등록된 방 안에서만 실행한다. 개인 관리방의
+            # 대상방 설정은 등록·수정·삭제 같은 관리 작업에만 적용한다.
             custom = self.admin_store.get_custom_command(user.room, normalized)
-            if custom is None and target_user.room != user.room:
-                custom = self.admin_store.get_custom_command(
-                    target_user.room,
-                    normalized,
-                )
-            # 방·대상방에 없으면 공용 기본(리그 순위 등)에서 찾는다.
-            # 모든 방이 기본으로 갖는 기능이라 새 방에도 자동으로 딸려온다.
-            if custom is None and user.room != BASE_ROOM:
-                custom = self.admin_store.get_custom_command(BASE_ROOM, normalized)
             if custom:
                 return BotResponse(fold_long_reply(custom.response))
             # 이 방에 등록되지 않은 명령어는 다른 봇의 것일 수 있으니 침묵한다.
@@ -1244,17 +1421,21 @@ class PokemonGoBot:
 
     def record_chat(
         self, room: str, sender: str, user_key: str | None, text: str = ""
-    ) -> None:
+    ) -> str:
         """랭킹 집계용으로 채팅 1건을 기록한다.
 
         봇에게 거는 명령어(/로 시작하는 말)는 대화가 아니므로 세지 않는다.
         랭킹도 포인트도 실제 채팅에만 붙는다.
         """
-        if parse_command(text) is not None:
-            return
         clean = self._chat_user(room, sender, user_key)
         if clean.room == "local" or clean.sender == "unknown":
-            return
+            return ""
+        if parse_command(text) is not None:
+            if clean.sender != "개인톡사용자":
+                self.admin_store.observe_member_identity(
+                    clean.room, clean.user_key, clean.sender
+                )
+            return ""
         self.admin_store.record_chat_message(
             clean.room, clean.user_key, clean.sender, date.today().isoformat()
         )
@@ -1262,28 +1443,87 @@ class PokemonGoBot:
         self.admin_store.add_points(
             clean.room, clean.user_key, clean.sender, CHAT_POINT
         )
-        # 닉네임 자동 갱신: 관리자목록 표시 이름도 최신으로.
-        # 개인톡방 placeholder는 진짜 닉네임이 아니므로 제외한다.
-        if clean.sender != "개인톡사용자":
-            self.admin_store.refresh_admin_display_name(clean.user_key, clean.sender)
+        settings = self.admin_store.get_moderation_settings(clean.room)
+        signals = self.chat_analyzer.analyze(
+            clean.room,
+            clean.user_key,
+            text,
+            ModerationSettings(
+                enabled=bool(settings["enabled"]),
+                fragment_count=int(settings["fragment_count"]),
+                fragment_window_seconds=int(settings["fragment_window"]),
+                eums_count=int(settings["eums_count"]),
+            ),
+        )
+        warning_kinds: set[str] = set()
+        for signal in signals:
+            self.admin_store.record_moderation_incident(
+                clean.room,
+                clean.user_key,
+                clean.sender,
+                signal.kind,
+                signal.score,
+                len(signal.messages),
+                preview_messages(signal.messages),
+                signal.features,
+                signal.messages,
+                signal.sent_at,
+            )
+            warning_enabled = (
+                bool(settings["fragment_warning_enabled"])
+                if signal.kind == "fragment"
+                else bool(settings["eums_warning_enabled"])
+            )
+            if warning_enabled and not bool(signal.features.get("continuation")):
+                warning_kinds.add(signal.kind)
+
+        warnings = []
+        if "fragment" in warning_kinds:
+            warnings.append(f"{clean.sender}님 단타 주의해 주세요.")
+        if "eums" in warning_kinds:
+            warnings.append(f"{clean.sender}님 음슴체 주의해 주세요.")
+        return "\n".join(warnings)
 
     def _handle_raffle(self, user: ChatUser) -> str:
-        # 오늘 1회 이상 활동한 사람만 대상.
-        pool = self.admin_store.raffle_pool(user.room, date.today().isoformat())
-        if not pool:
+        suppress_fragments = getattr(self.chat_analyzer, "suppress_fragments", None)
+        if callable(suppress_fragments):
+            suppress_fragments(user.room, RAFFLE_FRAGMENT_SUPPRESSION_SECONDS)
+
+        # 오늘 일반 채팅을 1회 이상 한 사람만 대상이다. 최근 7일 당첨자는
+        # user_key 기준으로 제외해 닉네임 변경이나 동명이인에도 정확히 동작한다.
+        today = date.today()
+        today_text = today.isoformat()
+        all_candidates = self.admin_store.raffle_candidates(user.room, today_text)
+        if not all_candidates:
             return "오늘 추첨할 대상이 없어요. (오늘 채팅한 사람 중에서 뽑아요)"
-        names = [name for name, _ in pool]
+
+        cutoff = (today - timedelta(days=RAFFLE_COOLDOWN_DAYS)).isoformat()
+        candidates = self.admin_store.raffle_candidates(
+            user.room,
+            today_text,
+            excluded_after=cutoff,
+        )
+        reset_used = not candidates
+        if reset_used:
+            candidates = all_candidates
+
         # 가중치는 활동량의 제곱근으로 완만하게. 활동이 반영되되 압도적인
         # 소수가 독식하지 않고 무작위성도 살아난다.
-        weights = [count**0.5 for _, count in pool]
-        winner = random.choices(names, weights=weights, k=1)[0]
-        return (
+        weights = [count**0.5 for _, _, count in candidates]
+        winner_key, winner, _ = random.choices(candidates, weights=weights, k=1)[0]
+        lines = [
             "🎉 추첨 결과 🎉\n"
             "━━━━━━━━━━━━━━\n"
             f"🎊 당첨 : {winner} 님!\n"
-            "━━━━━━━━━━━━━━\n"
-            f"축하합니다! (오늘 활동자 {len(names)}명 중 추첨)"
+            "━━━━━━━━━━━━━━"
+        ]
+        if reset_used:
+            lines.append("최근 7일 상품 수령 등록자를 제외하면 후보가 없어 전체 활동자로 다시 추첨했습니다.")
+        lines.append("상품을 전달한 뒤 관리 사이트에서 수령자로 등록해 주세요.")
+        lines.append(
+            f"축하합니다! (오늘 활동자 {len(all_candidates)}명 / 추첨 대상 {len(candidates)}명)"
         )
+        return "\n".join(lines)
 
     def _handle_chat_ranking(self, user: ChatUser, daily: bool) -> str:
         today = date.today().isoformat() if daily else None
@@ -1342,30 +1582,148 @@ class PokemonGoBot:
             "쓸 곳 보기 → /상품"
         )
 
-    def _handle_shop_add(self, user: ChatUser, query: str, target_room: str) -> str:
-        words = query.split()
-        if len(words) < 2:
-            return "형식은 이렇게예요.\n/상품등록 상품명 포인트\n예: /상품등록 전설몬 1마리 500"
-        try:
-            price = int(words[-1])
-        except ValueError:
-            return "맨 뒤에 필요한 포인트를 숫자로 적어주세요.\n예: /상품등록 전설몬 1마리 500"
-        if price < 0:
-            return "포인트는 0 이상으로 적어주세요."
-        name = " ".join(words[:-1]).strip()
-        if not name:
-            return "상품명을 입력해 주세요."
-        item_no = self.admin_store.add_shop_item(
-            target_room, name, price, user.user_key, user.sender
-        )
+    def _handle_point_ranking(self, user: ChatUser) -> str:
+        ranking = self.admin_store.point_ranking(user.room, limit=20)
+        if not ranking:
+            return "아직 이 방에서 포인트를 보유한 사람이 없어요."
+
+        lines = ["💰 포인트 순위 TOP 20", "━━━━━━━━━━━━━━"]
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        for rank, (display_name, points) in enumerate(ranking, start=1):
+            marker = medals.get(rank, f"{rank}.")
+            lines.append(f"{marker} {display_name} - {points:,}P")
+        return "\n".join(lines)
+
+    def _handle_shop_user_commands(self, room: str) -> str:
+        lines = [SHOP_USER_COMMANDS]
+        if not self.admin_store.is_shop_registration_admin_only(room):
+            fee, deposit = self.admin_store.get_shop_registration_costs(room)
+            lines.extend(
+                [
+                    "",
+                    "5. 상품 등록",
+                    "/상품등록 상품명 포인트",
+                    "└ 예시 : /상품등록 레이드 초대권 500",
+                    f"└ 등록 수수료 : {fee}P",
+                    f"└ 보증금 : {deposit}P (판매되면 반환)",
+                    f"└ 등록할 때 총 {fee + deposit}P가 필요합니다.",
+                ]
+            )
+        return "\n".join(lines)
+
+    def _handle_shop_feature_guide(self, room: str) -> str:
+        admin_only = self.admin_store.is_shop_registration_admin_only(room)
+        fee, deposit = self.admin_store.get_shop_registration_costs(room)
+        status = "owner/admin만 등록 가능" if admin_only else "일반 사용자 등록 허용"
         return (
-            "🛒 상품 등록\n"
-            f"{item_no}번 · {name} · {price}P\n"
-            f"등록자 : {user.sender}\n"
-            f"구매 → /구매 {item_no}"
+            f"{SHOP_FEATURE_GUIDE}\n\n"
+            "【 현재 방 설정 】\n"
+            f"└ 등록 권한 : {status}\n"
+            f"└ 일반 사용자 수수료 : {fee}P\n"
+            f"└ 일반 사용자 보증금 : {deposit}P"
         )
 
+    def _handle_shop_add(self, user: ChatUser, query: str, target_room: str) -> str:
+        is_manager = self._can_manage_room(user, target_room)
+        if (
+            self.admin_store.is_shop_registration_admin_only(target_room)
+            and not is_manager
+        ):
+            return (
+                "상품 등록은 해당 방의 owner 또는 admin만 사용할 수 있습니다.\n"
+                "상품 등록이 필요하면 방 관리자에게 문의해 주세요."
+            )
+        words = query.split()
+        if len(words) < 2:
+            return (
+                "형식은 이렇게 입력해 주세요.\n"
+                "/상품등록 상품명 포인트 [등록자 닉네임]\n"
+                "예: /상품등록 전설몬 1마리 500 나눔왕"
+            )
+
+        price_index = -1
+        price = 0
+        for index in range(len(words) - 1, 0, -1):
+            try:
+                price = int(words[index])
+                price_index = index
+                break
+            except ValueError:
+                continue
+        if price_index < 1:
+            return (
+                "상품명 뒤에 필요한 포인트를 숫자로 적어주세요.\n"
+                "/상품등록 상품명 포인트 [등록자 닉네임]"
+            )
+        if price < 0:
+            return "포인트는 0 이상으로 적어주세요."
+        name = " ".join(words[:price_index]).strip()
+        if not name:
+            return "상품명을 입력해 주세요."
+
+        registrant_name = " ".join(words[price_index + 1 :]).strip() or user.sender
+        has_custom_registrant = price_index != len(words) - 1
+        if has_custom_registrant and not is_manager:
+            return (
+                "일반 사용자는 등록자 닉네임을 따로 지정할 수 없습니다.\n"
+                "/상품등록 상품명 포인트 형식으로 입력해 주세요."
+            )
+
+        if not has_custom_registrant:
+            registrant_key = user.user_key
+        else:
+            registrant_key = (
+                self.admin_store.resolve_user_key_by_nickname(
+                    target_room, registrant_name
+                )
+                or ""
+            )
+        fee = 0
+        deposit = 0
+        remaining_points: int | None = None
+        if is_manager:
+            item_no = self.admin_store.add_shop_item(
+                target_room, name, price, registrant_key, registrant_name
+            )
+        else:
+            fee, deposit = self.admin_store.get_shop_registration_costs(target_room)
+            charged = self.admin_store.add_shop_item_with_charge(
+                target_room,
+                name,
+                price,
+                user.user_key,
+                user.sender,
+                fee,
+                deposit,
+            )
+            if charged is None:
+                current = self.admin_store.get_points(target_room, user.user_key)
+                required = fee + deposit
+                return (
+                    "상품 등록에 필요한 포인트가 부족합니다.\n"
+                    f"필요 포인트 : {required}P (수수료 {fee}P + 보증금 {deposit}P)\n"
+                    f"현재 포인트 : {current}P"
+                )
+            item_no, remaining_points = charged
+            registrant_key = user.user_key
+            registrant_name = user.sender
+
+        lines = [
+            "🛒 상품 등록",
+            f"{item_no}번 · {name} · {price}P",
+            f"등록자 : {registrant_name}",
+        ]
+        if not is_manager:
+            lines.append(f"차감 : {fee + deposit}P (수수료 {fee}P + 보증금 {deposit}P)")
+            if deposit:
+                lines.append(f"보증금 {deposit}P는 상품이 판매되면 반환됩니다.")
+            lines.append(f"남은 포인트 : {remaining_points}P")
+        lines.append(f"구매 → /구매 {item_no}")
+        return "\n".join(lines)
+
     def _handle_shop_remove(self, user: ChatUser, query: str, target_room: str) -> str:
+        if not self._can_manage_room(user, target_room):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
         try:
             item_no = int(query.strip())
         except ValueError:
@@ -1409,6 +1767,9 @@ class PokemonGoBot:
         if item is None:
             return f"{item_no}번 상품이 없어요. /상품 으로 확인해 주세요."
         name, price, seller_key, seller_name = item
+        deposit, deposit_owner_key, deposit_owner_name = (
+            self.admin_store.get_shop_item_deposit(user.room, item_no)
+        )
         points = self.admin_store.get_points(user.room, user.user_key)
         if points < price:
             return (
@@ -1433,6 +1794,20 @@ class PokemonGoBot:
             seller_key,
             seller_name,
         )
+        refunded_to = ""
+        if deposit and deposit_owner_key:
+            refunded_to = (
+                self.admin_store.latest_nickname(user.room, deposit_owner_key)
+                or deposit_owner_name
+            )
+            refunded_balance = self.admin_store.add_points(
+                user.room,
+                deposit_owner_key,
+                refunded_to,
+                deposit,
+            )
+            if deposit_owner_key == user.user_key:
+                left = refunded_balance
         seller = (
             self.admin_store.latest_nickname(user.room, seller_key)
             if seller_key
@@ -1446,6 +1821,8 @@ class PokemonGoBot:
         ]
         if seller:
             lines.append(f"📦 등록자 : {seller}")
+        if refunded_to:
+            lines.append(f"💳 {refunded_to} 님에게 보증금 {deposit}P 반환")
         lines.append(f"💰 남은 포인트 : {left}P")
         if remaining:
             lines.append("")
@@ -1481,7 +1858,14 @@ class PokemonGoBot:
         lines.append("전달 완료 → /구매내역삭제 번호")
         return fold_long_reply("\n".join(lines))
 
-    def _handle_shop_history_clear(self, user: ChatUser, query: str) -> str:
+    def _handle_shop_history_clear(
+        self,
+        user: ChatUser,
+        query: str,
+        target_room: str,
+    ) -> str:
+        if not self._can_manage_room(user, target_room):
+            return "이 명령어는 owner 또는 admin만 사용할 수 있습니다."
         target = query.strip()
         if not target:
             return (
@@ -1491,7 +1875,7 @@ class PokemonGoBot:
                 "번호 확인 → /구매내역"
             )
         if target in ("전체", "all"):
-            removed = self.admin_store.clear_purchases(user.room)
+            removed = self.admin_store.clear_purchases(target_room)
             if not removed:
                 return "지울 구매 내역이 없어요."
             return f"🧾 구매 내역 {removed}건을 모두 지웠어요."
@@ -1500,16 +1884,16 @@ class PokemonGoBot:
         except ValueError:
             return "번호를 숫자로 입력해 주세요.\n번호 확인 → /구매내역"
         # /구매내역과 같은 순서로 다시 읽어 화면 번호를 실제 기록으로 옮긴다.
-        purchases = self.admin_store.list_purchases(user.room)
+        purchases = self.admin_store.list_purchases(target_room)
         if not 1 <= position <= len(purchases):
             return f"{position}번 구매 내역이 없어요. /구매내역 으로 확인해 주세요."
         removed_item = self.admin_store.remove_purchase(
-            user.room, purchases[position - 1][0]
+            target_room, purchases[position - 1][0]
         )
         if removed_item is None:
             return f"{position}번 구매 내역이 없어요. /구매내역 으로 확인해 주세요."
         nickname, item_name = removed_item
-        left = len(self.admin_store.list_purchases(user.room))
+        left = len(self.admin_store.list_purchases(target_room))
         lines = [f"✅ 전달 완료 처리", f"{nickname} 님의 '{item_name}' 내역을 지웠어요."]
         if left:
             lines.append(f"남은 {left}건 번호를 1번부터 다시 매겼어요.")
@@ -1539,10 +1923,11 @@ class PokemonGoBot:
         return fold_long_reply("\n".join(lines))
 
     def _can_warn(self, user: ChatUser) -> bool:
-        # 경고 기능은 오너가 따로 권한을 준 사람만 쓴다(일반 admin 아님).
-        return self.admin_store.is_owner(user) or self.admin_store.has_warn_permission(
-            user.room, user.user_key
-        )
+        # 방 관리자는 등록 즉시 경고 기능을 사용할 수 있다. 경고 전용 권한은
+        # 전체 관리자 권한 없이 경고 업무만 맡길 때를 위해 함께 유지한다.
+        return self.admin_store.is_admin_or_owner(
+            user
+        ) or self.admin_store.has_warn_permission(user.room, user.user_key)
 
     def _handle_record_add(self, user: ChatUser, query: str, kind: str) -> str:
         info = RECORD_KINDS[kind]
@@ -1551,27 +1936,56 @@ class PokemonGoBot:
             return f"{label} 권한이 있는 사람만 쓸 수 있어요. (오너에게 /경고권한부여 요청)"
         words = query.split()
         if len(words) < 2:
-            return f"형식은 이렇게예요.\n/{label}추가 카톡닉네임 {field}"
-        # 닉네임에 공백이 있을 수 있어 가장 긴 이름부터 맞춰보고 나머지를 사유로 본다.
+            return (
+                f"형식은 이렇게예요.\n/{label}추가 카톡닉네임 {field}\n"
+                f"공백 닉네임: /{label}추가 아 아 사유 {field}"
+            )
+
         user_key = None
         nickname = ""
         reason = ""
-        for split_at in range(len(words) - 1, 0, -1):
-            candidate = " ".join(words[:split_at])
+        explicit_nickname = ""
+
+        # 공백 닉네임은 '사유'를 경계로 확실하게 나눈다.
+        # 칭찬은 '내용'도 같은 구분자로 허용하고, 기존 구분자 없는 입력도 유지한다.
+        delimiters = {"사유", field}
+        for split_at in range(len(words) - 2, 0, -1):
+            if words[split_at] not in delimiters:
+                continue
+            candidate = " ".join(words[:split_at]).strip()
+            explicit_reason = " ".join(words[split_at + 1 :]).strip()
+            if not candidate or not explicit_reason:
+                continue
+            explicit_nickname = candidate
             key = self.admin_store.resolve_user_key_by_nickname(user.room, candidate)
             if key:
                 user_key = key
                 nickname = candidate
-                reason = " ".join(words[split_at:]).strip()
+                reason = explicit_reason
                 break
+
+        # 구분자가 없으면 기존처럼 가장 긴 등록 닉네임부터 맞춘다.
+        if not user_key and not explicit_nickname:
+            for split_at in range(len(words) - 1, 0, -1):
+                candidate = " ".join(words[:split_at])
+                key = self.admin_store.resolve_user_key_by_nickname(user.room, candidate)
+                if key:
+                    user_key = key
+                    nickname = candidate
+                    reason = " ".join(words[split_at:]).strip()
+                    break
         if not user_key:
+            missing_name = explicit_nickname or words[0]
             return (
-                f"'{words[0]}' 님을 찾지 못했어요.\n"
+                f"'{missing_name}' 님을 찾지 못했어요.\n"
                 f"{label}은 그 사람이 채팅을 한 번 한 뒤에 등록할 수 있어요.\n"
                 "(닉네임이 아니라 고정 ID로 저장해서 닉 변경도 추적돼요.)"
             )
         if not reason:
-            return f"{field}를 함께 입력해 주세요.\n예: /{label}추가 홍길동 …"
+            return (
+                f"{field}를 함께 입력해 주세요.\n"
+                f"예: /{label}추가 아 아 사유 {field}"
+            )
         count = self.admin_store.add_warning(
             user.room, user_key, nickname, reason, user.sender, kind=kind
         )
@@ -1702,15 +2116,16 @@ class PokemonGoBot:
         return "\n".join(lines)
 
     def handle_member_joins(self, room: str, members: list[tuple[str, str]]) -> str:
-        """입장 이벤트를 방별로 세고, 2회차 이상이면 의심 문구를 만든다."""
+        """입장 이벤트를 방별로 세고, 설정된 기준 이상이면 의심 문구를 만든다."""
         clean_room = normalize_room(room) or "local"
+        alert_threshold = self.admin_store.get_join_alert_threshold(clean_room)
         suspects = []
         for user_id, nickname in members:
             count, counted = self.admin_store.record_member_join(
                 clean_room, user_id, nickname
             )
             # 강퇴 후 복귀는 counted=False 라 의심 문구를 내지 않는다.
-            if counted and count >= 2:
+            if counted and count >= alert_threshold:
                 suspects.append(f"{nickname or '누군가'} 님 · 입장 {count}회차")
         if not suspects:
             return ""
@@ -1956,12 +2371,25 @@ class PokemonGoBot:
             lines.append("관리 명령어")
             lines.extend(ADMIN_COMMANDS)
 
+        if role == "admin" and not self.admin_store.is_global_owner(user):
+            lines.append("/관리자명령어")
+
         if role == "owner":
             lines.append("")
             lines.append("오너 명령어")
             lines.extend(OWNER_COMMANDS)
 
         return "\n".join(lines)
+
+    def _handle_admin_command_guide(self, user: ChatUser) -> str:
+        # owner는 admin과 별도 역할이다. 방에 admin 레코드가 잘못 겹쳐 있어도
+        # 봇의 전역 owner라면 관리자 전용 안내를 열지 않는다.
+        if (
+            self.admin_store.is_global_owner(user)
+            or self.admin_store.get_role(user) != "admin"
+        ):
+            return "이 명령어는 해당 방의 admin만 사용할 수 있습니다."
+        return ADMIN_COMMAND_GUIDE
 
     @staticmethod
     def _parse_custom_upsert(query: str) -> tuple[str, str] | None:
@@ -2025,8 +2453,14 @@ class PokemonGoBot:
             "포인트",
             "내포인트",
             "point",
+            "포인트순위",
+            "포인트랭킹",
             "상품등록",
             "상품추가",
+            "상품기능가이드",
+            "상점가이드",
+            "상품명령어",
+            "상점명령어",
             "상품삭제",
             "상품",
             "상점",
@@ -2088,6 +2522,8 @@ class PokemonGoBot:
             "레이드초기화",
             "오너등록",
             "owner",
+            "관리자명령어",
+            "관리자도움말",
             "관리자요청",
             "권한확인",
             "role",
