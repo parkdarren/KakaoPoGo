@@ -224,6 +224,7 @@ SITE_PAGE = """<!doctype html>
   label { color: var(--label); font-size: 0.76rem; }
   input, textarea, select { min-height: 48px; padding: 12px 13px; border-color: var(--line); background: var(--field); }
   input:focus, textarea:focus, select:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(17,174,189,0.13), 0 4px 12px rgba(11,40,61,0.05); }
+  #response { min-height: 380px; padding: 16px; line-height: 1.65; resize: vertical; }
   .checkrow input:checked { background: var(--cyan-deep); }
   .checkrow input:focus-visible { box-shadow: 0 0 0 3px rgba(17,174,189,0.15); }
   .cmdrow .slash { background: var(--navy); }
@@ -260,6 +261,7 @@ SITE_PAGE = """<!doctype html>
     .section-title { gap: 10px; }
     .section-title::before { width: 38px; height: 38px; }
     .title-copy strong { font-size: 0.91rem; }
+    #response { min-height: 300px; }
     .title-copy small { font-size: 0.67rem; }
     .section-body { padding: 5px 14px 17px; }
   }
