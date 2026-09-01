@@ -200,7 +200,7 @@ BUILTIN_HELP_ENTRIES = [
     ),
     (
         "/랭킹",
-        "완료된 달마다 이 방에서 채팅을 가장 많이 한 1위를 명예의 전당으로 보여줍니다.",
+        "완료된 달마다 이 방에서 채팅을 가장 많이 한 월간 우승자를 명예의 전당으로 보여줍니다.",
     ),
     (
         "/포인트",
@@ -1549,11 +1549,13 @@ class PokemonGoBot:
         if not winners:
             return "완료된 월간 채팅 기록이 아직 없어요."
 
-        lines = ["🏆 명예의 전당", "━━━━━━━━━━━━━━"]
-        for chat_month, display_name, count in winners:
-            lines.append(
-                f"{chat_month.replace('-', '/')} 1위 {display_name} {count:,}회"
-            )
+        lines = ["🏆 월간 채팅 명예의 전당", "━━━━━━━━━━━━━━"]
+        for index, (chat_month, display_name, count) in enumerate(winners):
+            year, month = chat_month.split("-", 1)
+            lines.append(f"📅 {year}년 {int(month)}월")
+            lines.append(f"👑 {display_name} · {count:,}회")
+            if index < len(winners) - 1:
+                lines.append("")
         return "\n".join(lines)
 
     def _handle_attendance_ranking(self, user: ChatUser) -> str:

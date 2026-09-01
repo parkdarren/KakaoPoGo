@@ -2270,9 +2270,10 @@ def test_chat_ranking_daily_and_monthly_hall_of_fame(tmp_path, monkeypatch) -> N
         )
 
     hall = send("/랭킹", "조용한사람", "hash:quiet").json()["reply"]
-    assert hall.startswith("🏆 명예의 전당")
-    assert "2025/01 1위 1월왕 5회" in hall
-    assert "2025/02 1위 2월왕 7회" in hall
+    assert hall.startswith("🏆 월간 채팅 명예의 전당")
+    assert "📅 2025년 1월\n👑 1월왕 · 5회" in hall
+    assert "📅 2025년 2월\n👑 2월왕 · 7회" in hall
+    assert "1위" not in hall
     assert "1월2등" not in hall
     assert "수다왕" not in hall
 
