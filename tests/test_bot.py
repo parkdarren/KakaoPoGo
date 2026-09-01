@@ -2222,7 +2222,7 @@ async def test_daily_pokemon_checks_in_once_per_day(tmp_path) -> None:
     assert "(누적 1일)" in other
 
 
-def test_chat_ranking_daily_and_total(tmp_path, monkeypatch) -> None:
+def test_chat_ranking_daily_and_monthly_hall_of_fame(tmp_path, monkeypatch) -> None:
     import app.main as main_module
 
     test_bot = PokemonGoBot(
@@ -2255,9 +2255,26 @@ def test_chat_ranking_daily_and_total(tmp_path, monkeypatch) -> None:
     assert "🥇 수다왕 - 3회" in daily  # 명령어 3건은 빠지고 실제 채팅만
     assert "🥈 조용한사람 - 1회" in daily
 
-    total = send("/랭킹", "조용한사람", "hash:quiet").json()["reply"]
-    assert total.startswith("💬 누적 채팅 랭킹 TOP 10")
-    assert "수다왕" in total
+    # /랭킹은 완료된 달의 1위만 보여준다. 현재 달 기록은 아직 확정하지 않는다.
+    for _ in range(5):
+        test_bot.admin_store.record_chat_message(
+            "수다방", "hash:jan-winner", "1월왕", "2025-01-10"
+        )
+    for _ in range(3):
+        test_bot.admin_store.record_chat_message(
+            "수다방", "hash:jan-runner", "1월2등", "2025-01-11"
+        )
+    for _ in range(7):
+        test_bot.admin_store.record_chat_message(
+            "수다방", "hash:feb-winner", "2월왕", "2025-02-15"
+        )
+
+    hall = send("/랭킹", "조용한사람", "hash:quiet").json()["reply"]
+    assert hall.startswith("🏆 명예의 전당")
+    assert "2025/01 1위 1월왕 5회" in hall
+    assert "2025/02 1위 2월왕 7회" in hall
+    assert "1월2등" not in hall
+    assert "수다왕" not in hall
 
     # 명령어만 오간 방은 집계가 비어 있다.
     empty = client.get(

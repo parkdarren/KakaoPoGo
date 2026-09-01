@@ -1461,6 +1461,63 @@ class AdminStore:
                 ).fetchall()
         return [(row["display_name"], row["n"]) for row in rows]
 
+    def monthly_chat_winners(
+        self, room: str, before_month: str
+    ) -> list[tuple[str, str, int]]:
+        """완료된 월별 채팅 1위 (YYYY-MM, 최신 닉네임, 채팅 수)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                WITH monthly_totals AS (
+                    SELECT
+                        substr(chat_date, 1, 7) AS chat_month,
+                        user_key,
+                        SUM(message_count) AS n
+                    FROM chat_stats
+                    WHERE room = ?
+                      AND substr(chat_date, 1, 7) < ?
+                      AND message_count > 0
+                    GROUP BY chat_month, user_key
+                ),
+                ranked AS (
+                    SELECT
+                        chat_month,
+                        user_key,
+                        n,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY chat_month
+                            ORDER BY n DESC, user_key
+                        ) AS place
+                    FROM monthly_totals
+                )
+                SELECT
+                    ranked.chat_month,
+                    COALESCE(
+                        room_members.display_name,
+                        (
+                            SELECT stats.display_name
+                            FROM chat_stats AS stats
+                            WHERE stats.room = ?
+                              AND stats.user_key = ranked.user_key
+                            ORDER BY stats.chat_date DESC
+                            LIMIT 1
+                        )
+                    ) AS display_name,
+                    ranked.n
+                FROM ranked
+                LEFT JOIN room_members
+                  ON room_members.room = ?
+                 AND room_members.user_key = ranked.user_key
+                WHERE ranked.place = 1
+                ORDER BY ranked.chat_month
+                """,
+                (room, before_month, room, room),
+            ).fetchall()
+        return [
+            (row["chat_month"], row["display_name"], row["n"])
+            for row in rows
+        ]
+
     def record_raid_cancel(self, room: str, nickname: str, today: str) -> tuple[int, int]:
         """취소 횟수를 닉네임별로 누적하고 (오늘 횟수, 누적 횟수)를 돌려준다."""
         nickname_key = nickname.lower()

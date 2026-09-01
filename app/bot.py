@@ -196,8 +196,11 @@ BUILTIN_HELP_ENTRIES = [
     ),
     (
         "/일일랭킹",
-        "오늘 이 방에서 채팅을 많이 한 순위 TOP 10을 보여줍니다.\n"
-        "누적 순위는 /랭킹",
+        "오늘 이 방에서 채팅을 많이 한 순위 TOP 10을 보여줍니다.",
+    ),
+    (
+        "/랭킹",
+        "완료된 달마다 이 방에서 채팅을 가장 많이 한 1위를 명예의 전당으로 보여줍니다.",
     ),
     (
         "/포인트",
@@ -1526,19 +1529,31 @@ class PokemonGoBot:
         return "\n".join(lines)
 
     def _handle_chat_ranking(self, user: ChatUser, daily: bool) -> str:
-        today = date.today().isoformat() if daily else None
-        ranking = self.admin_store.chat_ranking(user.room, today=today, limit=10)
-        if not ranking:
-            if daily:
+        if daily:
+            ranking = self.admin_store.chat_ranking(
+                user.room, today=date.today().isoformat(), limit=10
+            )
+            if not ranking:
                 return "오늘 집계된 채팅이 아직 없어요."
-            return "집계된 채팅 기록이 아직 없어요."
 
-        title = "💬 오늘의 채팅 랭킹 TOP 10" if daily else "💬 누적 채팅 랭킹 TOP 10"
-        lines = [title, "━━━━━━━━━━━━━━"]
-        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        for rank, (display_name, count) in enumerate(ranking, start=1):
-            marker = medals.get(rank, f"{rank}.")
-            lines.append(f"{marker} {display_name} - {count:,}회")
+            lines = ["💬 오늘의 채팅 랭킹 TOP 10", "━━━━━━━━━━━━━━"]
+            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+            for rank, (display_name, count) in enumerate(ranking, start=1):
+                marker = medals.get(rank, f"{rank}.")
+                lines.append(f"{marker} {display_name} - {count:,}회")
+            return "\n".join(lines)
+
+        winners = self.admin_store.monthly_chat_winners(
+            user.room, before_month=date.today().strftime("%Y-%m")
+        )
+        if not winners:
+            return "완료된 월간 채팅 기록이 아직 없어요."
+
+        lines = ["🏆 명예의 전당", "━━━━━━━━━━━━━━"]
+        for chat_month, display_name, count in winners:
+            lines.append(
+                f"{chat_month.replace('-', '/')} 1위 {display_name} {count:,}회"
+            )
         return "\n".join(lines)
 
     def _handle_attendance_ranking(self, user: ChatUser) -> str:
