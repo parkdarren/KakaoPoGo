@@ -260,6 +260,7 @@ class AdminStore:
                 CREATE TABLE IF NOT EXISTS room_settings (
                     room TEXT PRIMARY KEY,
                     join_alert_threshold INTEGER NOT NULL DEFAULT 5,
+                    raffle_weekly_weight_enabled INTEGER NOT NULL DEFAULT 0,
                     shop_registration_admin_only INTEGER NOT NULL DEFAULT 1,
                     shop_registration_fee INTEGER NOT NULL DEFAULT 100,
                     shop_registration_deposit INTEGER NOT NULL DEFAULT 0,
@@ -389,6 +390,12 @@ class AdminStore:
             # 상품은 팔리면 지워지므로 등록자를 구매 시점에 함께 남긴다.
             self._ensure_column(conn, "shop_purchases", "seller_key", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "shop_purchases", "seller_name", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(
+                conn,
+                "room_settings",
+                "raffle_weekly_weight_enabled",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
             self._ensure_column(
                 conn,
                 "room_settings",
@@ -1285,6 +1292,25 @@ class AdminStore:
                     (room, today, excluded_after),
                 ).fetchall()
         return [(row["user_key"], row["display_name"], row["n"]) for row in rows]
+
+    def raffle_activity_counts(
+        self,
+        room: str,
+        start_date: str,
+        end_date: str,
+    ) -> dict[str, int]:
+        """지정 기간의 사용자별 채팅량을 반환한다."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_key, SUM(message_count) AS n
+                FROM chat_stats
+                WHERE room = ? AND chat_date BETWEEN ? AND ?
+                GROUP BY user_key
+                """,
+                ((room or "").strip(), start_date, end_date),
+            ).fetchall()
+        return {row["user_key"]: int(row["n"]) for row in rows}
 
     def record_raffle_winner(
         self,
@@ -2251,6 +2277,34 @@ class AdminStore:
                 (clean_room, value),
             )
         return value
+
+    def is_raffle_weekly_weight_enabled(self, room: str) -> bool:
+        """최근 7일 채팅량을 추첨 확률에 반영하는지 반환한다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT raffle_weekly_weight_enabled FROM room_settings WHERE room = ?",
+                ((room or "").strip(),),
+            ).fetchone()
+        return bool(row["raffle_weekly_weight_enabled"]) if row else False
+
+    def set_raffle_weekly_weight_enabled(self, room: str, enabled: bool) -> bool:
+        """최근 7일 채팅량 추첨 가중치 사용 여부를 방별로 저장한다."""
+        clean_room = (room or "").strip()
+        if not clean_room:
+            raise ValueError("room is required")
+        value = 1 if enabled else 0
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO room_settings (room, raffle_weekly_weight_enabled)
+                VALUES (?, ?)
+                ON CONFLICT(room) DO UPDATE SET
+                    raffle_weekly_weight_enabled = excluded.raffle_weekly_weight_enabled,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (clean_room, value),
+            )
+        return bool(value)
 
     def is_shop_registration_admin_only(self, room: str) -> bool:
         """상품 등록을 owner/admin에게만 허용하는지 반환한다."""

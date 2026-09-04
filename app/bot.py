@@ -1510,9 +1510,29 @@ class PokemonGoBot:
         if reset_used:
             candidates = all_candidates
 
-        # 가중치는 활동량의 제곱근으로 완만하게. 활동이 반영되되 압도적인
-        # 소수가 독식하지 않고 무작위성도 살아난다.
-        weights = [count**0.5 for _, _, count in candidates]
+        if self.admin_store.is_raffle_weekly_weight_enabled(user.room):
+            week_start = (today - timedelta(days=6)).isoformat()
+            weekly_counts = self.admin_store.raffle_activity_counts(
+                user.room, week_start, today_text
+            )
+            highest_count = max(
+                weekly_counts.get(user_key, today_count)
+                for user_key, _, today_count in candidates
+            )
+            # 기본 확률을 모두에게 주고 활동 가중치는 최대 4배로 제한한다.
+            # 제곱근 곡선이라 활동량 차이는 반영하면서 과도한 독식을 막는다.
+            weights = [
+                1.0
+                + 3.0
+                * (
+                    weekly_counts.get(user_key, today_count) / highest_count
+                )
+                ** 0.5
+                for user_key, _, today_count in candidates
+            ]
+        else:
+            # 기존 설정은 오늘 활동량의 제곱근 가중치를 그대로 사용한다.
+            weights = [count**0.5 for _, _, count in candidates]
         winner_key, winner, _ = random.choices(candidates, weights=weights, k=1)[0]
         lines = [
             "🎉 추첨 결과 🎉\n"

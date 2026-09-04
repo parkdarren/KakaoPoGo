@@ -349,6 +349,16 @@ SITE_PAGE = """<!doctype html>
     <p class="hint">입장 횟수가 기준 이상일 때만 들낙 의심 안내를 전송합니다. 기본값은 5회입니다.</p>
     </div>
   </details>
+  <details class="setting-group" data-section="raffle-settings">
+    <summary>추첨 설정</summary>
+    <div class="setting-body">
+    <label class="checkrow" for="raffleWeeklyWeightEnabled">
+      <input id="raffleWeeklyWeightEnabled" type="checkbox">
+      <span>최근 7일 채팅량 가중치 적용</span>
+    </label>
+    <p class="hint">켜면 오늘 활동한 추첨 대상 중 최근 7일 채팅이 많은 사람의 당첨 확률이 높아집니다. 활동이 적어도 당첨 가능성은 유지됩니다.</p>
+    </div>
+  </details>
   <details class="setting-group" data-section="point-shop">
     <summary>포인트 상점</summary>
     <div class="setting-body">
@@ -558,6 +568,7 @@ async function loadJoinAlertSettings() {
   try {
     const data = await req("/room-settings", {});
     $("joinAlertThreshold").value = String(data.joinAlertThreshold);
+    $("raffleWeeklyWeightEnabled").checked = data.raffleWeeklyWeightEnabled === true;
     $("shopRegistrationAdminOnly").checked = data.shopRegistrationAdminOnly !== false;
     $("shopRegistrationFee").value = String(data.shopRegistrationFee);
     $("shopRegistrationDeposit").value = String(data.shopRegistrationDeposit);
@@ -577,6 +588,7 @@ async function loadJoinAlertSettings() {
 
 async function saveJoinAlertSettings() {
   const threshold = Number($("joinAlertThreshold").value);
+  const raffleWeeklyWeightEnabled = $("raffleWeeklyWeightEnabled").checked;
   const shopAdminOnly = $("shopRegistrationAdminOnly").checked;
   const shopFee = Number($("shopRegistrationFee").value);
   const shopDeposit = Number($("shopRegistrationDeposit").value);
@@ -616,6 +628,7 @@ async function saveJoinAlertSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         join_alert_threshold: threshold,
+        raffle_weekly_weight_enabled: raffleWeeklyWeightEnabled,
         shop_registration_admin_only: shopAdminOnly,
         shop_registration_fee: shopFee,
         shop_registration_deposit: shopDeposit,
@@ -629,6 +642,7 @@ async function saveJoinAlertSettings() {
       }),
     });
     $("joinAlertThreshold").value = String(data.joinAlertThreshold);
+    $("raffleWeeklyWeightEnabled").checked = data.raffleWeeklyWeightEnabled === true;
     $("shopRegistrationAdminOnly").checked = data.shopRegistrationAdminOnly !== false;
     $("shopRegistrationFee").value = String(data.shopRegistrationFee);
     $("shopRegistrationDeposit").value = String(data.shopRegistrationDeposit);

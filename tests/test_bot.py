@@ -159,6 +159,7 @@ def test_admin_web_saves_long_command(tmp_path, monkeypatch) -> None:
     assert "닉네임 일부를 입력하세요" in page.text
     assert "방 운영 설정" in page.text
     assert "들낙 안내 출력 기준 횟수" in page.text
+    assert "최근 7일 채팅량 가중치 적용" in page.text
     assert "상품 등록을 오너와 관리자만 허용" in page.text
     assert "일반 사용자 상품 등록 수수료" in page.text
     assert "일반 사용자 상품 등록 보증금" in page.text
@@ -243,6 +244,7 @@ def test_admin_web_saves_long_command(tmp_path, monkeypatch) -> None:
         "/admin/room-settings", headers=auth, params={"room": "종합방"}
     )
     assert default_settings.json()["joinAlertThreshold"] == 5
+    assert default_settings.json()["raffleWeeklyWeightEnabled"] is False
     assert default_settings.json()["shopRegistrationAdminOnly"] is True
     assert default_settings.json()["shopRegistrationFee"] == 100
     assert default_settings.json()["shopRegistrationDeposit"] == 0
@@ -261,6 +263,14 @@ def test_admin_web_saves_long_command(tmp_path, monkeypatch) -> None:
     )
     assert saved_settings.json()["joinAlertThreshold"] == 7
     assert test_bot.admin_store.get_join_alert_threshold("종합방") == 7
+
+    weighted_raffle = client.post(
+        "/admin/room-settings",
+        headers=auth,
+        json={"room": "종합방", "raffle_weekly_weight_enabled": True},
+    )
+    assert weighted_raffle.json()["raffleWeeklyWeightEnabled"] is True
+    assert test_bot.admin_store.is_raffle_weekly_weight_enabled("종합방")
 
     public_shop_registration = client.post(
         "/admin/room-settings",
@@ -485,9 +495,11 @@ def test_owner_can_issue_room_management_site(tmp_path, monkeypatch) -> None:
     assert "상품 등록을 오너와 관리자만 허용" in site_page.text
     assert "일반 사용자 상품 등록 수수료" in site_page.text
     assert "일반 사용자 상품 등록 보증금" in site_page.text
+    assert "최근 7일 채팅량 가중치 적용" in site_page.text
 
     token_settings = client.get(f"/r/{token}/room-settings")
     assert token_settings.json()["joinAlertThreshold"] == 5
+    assert token_settings.json()["raffleWeeklyWeightEnabled"] is False
     assert token_settings.json()["shopRegistrationAdminOnly"] is True
     assert token_settings.json()["shopRegistrationFee"] == 100
     assert token_settings.json()["shopRegistrationDeposit"] == 0
@@ -502,6 +514,7 @@ def test_owner_can_issue_room_management_site(tmp_path, monkeypatch) -> None:
         f"/r/{token}/room-settings",
         json={
             "join_alert_threshold": 8,
+            "raffle_weekly_weight_enabled": True,
             "shop_registration_admin_only": False,
             "shop_registration_fee": 200,
             "shop_registration_deposit": 700,
@@ -509,10 +522,12 @@ def test_owner_can_issue_room_management_site(tmp_path, monkeypatch) -> None:
         },
     )
     assert token_saved.json()["joinAlertThreshold"] == 8
+    assert token_saved.json()["raffleWeeklyWeightEnabled"] is True
     assert token_saved.json()["shopRegistrationAdminOnly"] is False
     assert token_saved.json()["shopRegistrationFee"] == 200
     assert token_saved.json()["shopRegistrationDeposit"] == 700
     assert test_bot.admin_store.get_join_alert_threshold("사이트방") == 8
+    assert test_bot.admin_store.is_raffle_weekly_weight_enabled("사이트방")
     assert not test_bot.admin_store.is_shop_registration_admin_only("사이트방")
     assert test_bot.admin_store.get_shop_registration_costs("사이트방") == (200, 700)
 
@@ -2333,6 +2348,43 @@ async def test_raffle_temporarily_ignores_countdown_fragments(tmp_path) -> None:
         assert bot.record_chat("추첨방", "진행자", "iris:host", message) == ""
 
     assert store.list_moderation_incidents("추첨방") == []
+
+
+@pytest.mark.anyio
+async def test_raffle_can_weight_recent_weekly_activity(tmp_path, monkeypatch) -> None:
+    from datetime import date, timedelta
+
+    store = AdminStore(tmp_path / "test.sqlite3")
+    bot = PokemonGoBot(admin_store=store, owner_setup_code="test-setup-code")
+    today = date.today()
+
+    bot.record_chat("추첨방", "활발이", "iris:1")
+    bot.record_chat("추첨방", "가끔이", "iris:2")
+    for offset in range(1, 7):
+        for _ in range(2):
+            store.record_chat_message(
+                "추첨방",
+                "iris:1",
+                "활발이",
+                (today - timedelta(days=offset)).isoformat(),
+            )
+
+    captured_weights = []
+
+    def choose_first(population, weights, k):
+        captured_weights.append(list(weights))
+        return [population[0]]
+
+    monkeypatch.setattr("app.bot.random.choices", choose_first)
+
+    await bot.handle("/추첨", room="추첨방", sender="진행자")
+    assert captured_weights[-1] == [1.0, 1.0]
+
+    store.set_raffle_weekly_weight_enabled("추첨방", True)
+    await bot.handle("/추첨", room="추첨방", sender="진행자")
+    active_weight, occasional_weight = captured_weights[-1]
+    assert active_weight == 4.0
+    assert 1.0 < occasional_weight < active_weight
 
 
 @pytest.mark.anyio

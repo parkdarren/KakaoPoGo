@@ -677,6 +677,7 @@ class RoomSiteIssueRequest(BaseModel):
 class RoomSettingsRequest(BaseModel):
     room: str
     join_alert_threshold: int | None = None
+    raffle_weekly_weight_enabled: bool | None = None
     shop_registration_admin_only: bool | None = None
     shop_registration_fee: int | None = None
     shop_registration_deposit: int | None = None
@@ -690,6 +691,7 @@ class RoomSettingsRequest(BaseModel):
 
 class TokenRoomSettingsRequest(BaseModel):
     join_alert_threshold: int | None = None
+    raffle_weekly_weight_enabled: bool | None = None
     shop_registration_admin_only: bool | None = None
     shop_registration_fee: int | None = None
     shop_registration_deposit: int | None = None
@@ -801,6 +803,7 @@ def _room_settings_payload(room: str) -> dict[str, Any]:
     return {
         "room": room,
         "joinAlertThreshold": bot.admin_store.get_join_alert_threshold(room),
+        "raffleWeeklyWeightEnabled": bot.admin_store.is_raffle_weekly_weight_enabled(room),
         "shopRegistrationAdminOnly": bot.admin_store.is_shop_registration_admin_only(room),
         "shopRegistrationFee": fee,
         "shopRegistrationDeposit": deposit,
@@ -1006,6 +1009,7 @@ async def admin_save_room_settings(
         raise HTTPException(status_code=400, detail="대상 방을 선택해 주세요.")
     if (
         request.join_alert_threshold is None
+        and request.raffle_weekly_weight_enabled is None
         and request.shop_registration_admin_only is None
         and request.shop_registration_fee is None
         and request.shop_registration_deposit is None
@@ -1020,6 +1024,10 @@ async def admin_save_room_settings(
     if request.join_alert_threshold is not None:
         threshold = _validate_join_alert_threshold(request.join_alert_threshold)
         bot.admin_store.set_join_alert_threshold(room, threshold)
+    if request.raffle_weekly_weight_enabled is not None:
+        bot.admin_store.set_raffle_weekly_weight_enabled(
+            room, request.raffle_weekly_weight_enabled
+        )
     if request.shop_registration_admin_only is not None:
         bot.admin_store.set_shop_registration_admin_only(
             room, request.shop_registration_admin_only
@@ -1354,6 +1362,7 @@ async def site_save_room_settings(
     _require_room_password(room, request.room_password)
     if (
         request.join_alert_threshold is None
+        and request.raffle_weekly_weight_enabled is None
         and request.shop_registration_admin_only is None
         and request.shop_registration_fee is None
         and request.shop_registration_deposit is None
@@ -1368,6 +1377,10 @@ async def site_save_room_settings(
     if request.join_alert_threshold is not None:
         threshold = _validate_join_alert_threshold(request.join_alert_threshold)
         bot.admin_store.set_join_alert_threshold(room, threshold)
+    if request.raffle_weekly_weight_enabled is not None:
+        bot.admin_store.set_raffle_weekly_weight_enabled(
+            room, request.raffle_weekly_weight_enabled
+        )
     if request.shop_registration_admin_only is not None:
         bot.admin_store.set_shop_registration_admin_only(
             room, request.shop_registration_admin_only
